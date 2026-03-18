@@ -91,6 +91,8 @@ Claude: [calls lore search] Found 3 relevant conversations...
 | `get_context` | Expand search results with surrounding conversation |
 | `list_sessions` | Browse indexed sessions by project |
 
+> `full` mode requires `confirm: true` as a safety gate — the AI doesn't know about this parameter, so it has to ask you before triggering a destructive reindex.
+
 ## Why This Exists
 
 Claude Code stores every conversation as a JSONL transcript in `~/.claude/projects/`. After a few weeks, you have hundreds of sessions across dozens of projects -- discussions about architecture decisions, debugging sessions, code reviews, and design explorations.
