@@ -53,9 +53,11 @@ codex mcp add lore -- getlore
 ```bash
 npm install -g getlore
 claude mcp add -s user lore -- getlore
+```
 
-# To update later:
-npm install -g getlore@latest
+```bash
+getlore --version   # Check installed version
+getlore update      # Update to latest
 ```
 
 </details>
