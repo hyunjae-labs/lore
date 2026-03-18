@@ -33,6 +33,8 @@ export interface IndexProgress {
   sessionsTotal: number;
   chunksCreated: number;
   currentProject: string;
+  currentSessionChunks: number;  // chunks in current session being processed
+  currentSessionTotal: number;   // total chunks to embed for current session
   startedAt: number;
   completedAt: number | null;
   error: string | null;
@@ -47,6 +49,8 @@ const progress: IndexProgress = {
   sessionsTotal: 0,
   chunksCreated: 0,
   currentProject: "",
+  currentSessionChunks: 0,
+  currentSessionTotal: 0,
   startedAt: 0,
   completedAt: null,
   error: null,
@@ -343,7 +347,11 @@ async function runIndexInBackground(
         }
 
         const textsToEmbed = chunks.map((chunk) => `passage: ${chunk.content}`);
-        const embeddings = await embedder.embedBatch(textsToEmbed);
+        progress.currentSessionChunks = 0;
+        progress.currentSessionTotal = chunks.length;
+        const embeddings = await embedder.embedBatch(textsToEmbed, (done) => {
+          progress.currentSessionChunks = done;
+        });
 
         let chunkIndexOffset = 0;
         if (reindexStrategy === "append" && existingSession) {

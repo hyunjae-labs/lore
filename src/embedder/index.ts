@@ -65,7 +65,7 @@ async function initPipeline(): Promise<FeatureExtractionPipeline> {
 
 export interface Embedder {
   embed(text: string): Promise<Float32Array>;
-  embedBatch(texts: string[]): Promise<Float32Array[]>;
+  embedBatch(texts: string[], onProgress?: (done: number) => void): Promise<Float32Array[]>;
 }
 
 export async function getEmbedder(): Promise<Embedder> {
@@ -80,7 +80,7 @@ export async function getEmbedder(): Promise<Embedder> {
       return new Float32Array(flat);
     },
 
-    async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    async embedBatch(texts: string[], onProgress?: (done: number) => void): Promise<Float32Array[]> {
       const results: Float32Array[] = [];
       for (let i = 0; i < texts.length; i += CONFIG.indexBatchSize) {
         const batch = texts.slice(i, i + CONFIG.indexBatchSize);
@@ -89,6 +89,7 @@ export async function getEmbedder(): Promise<Embedder> {
         for (const vec of nested) {
           results.push(new Float32Array(vec));
         }
+        onProgress?.(results.length);
       }
       return results;
     },

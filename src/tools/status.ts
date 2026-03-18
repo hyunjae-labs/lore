@@ -32,6 +32,9 @@ export async function handleStatus(
             status: "running",
             progress: `${progress.sessionsIndexed}/${progress.sessionsTotal} sessions`,
             current_project: progress.currentProject,
+            current_session: progress.currentSessionTotal > 0
+              ? `embedding ${progress.currentSessionChunks}/${progress.currentSessionTotal} chunks`
+              : undefined,
             chunks_created: progress.chunksCreated,
             elapsed_ms: elapsed,
             eta: etaStr,
