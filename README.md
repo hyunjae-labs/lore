@@ -85,8 +85,8 @@ Claude: [calls lore search] Found 3 relevant conversations...
 | Tool | Purpose |
 |------|---------|
 | `manage_projects` | Register/unregister projects for indexing |
-| `index` | Start background indexing of registered projects |
-| `status` | Check indexing progress and DB health |
+| `index` | Start background indexing. Modes: `incremental` (default), `full` (requires `confirm: true`), `cancel` |
+| `status` | Check indexing progress, ETA, skip reasons, DB health |
 | `search` | Semantic + keyword search across conversations |
 | `get_context` | Expand search results with surrounding conversation |
 | `list_sessions` | Browse indexed sessions by project |
