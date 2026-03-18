@@ -25,16 +25,17 @@ async function initPipeline(): Promise<FeatureExtractionPipeline> {
           msg.includes("providers_cuda") || msg.includes("CUDA");
 
         if (isCudaMissing) {
-          // GPU exists but CUDA toolkit not installed — guide user to fix, don't silently degrade
+          // GPU exists but CUDA libraries not found — guide user to fix
           console.error([
-            "[lore] NVIDIA GPU detected but CUDA toolkit is not installed.",
-            "Without CUDA toolkit, indexing will be extremely slow (CPU only).",
+            "[lore] NVIDIA GPU detected but required CUDA libraries are missing.",
+            "Without GPU acceleration, indexing will be extremely slow (CPU only).",
             "",
-            "To install CUDA toolkit on WSL2:",
-            "  wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb",
-            "  sudo dpkg -i cuda-keyring_1.1-1_all.deb",
-            "  sudo apt-get update && sudo apt-get install -y cuda-toolkit-12-4",
-            "  export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH",
+            "Quick fix (pip, lightweight):",
+            "  pip install nvidia-cublas-cu12 nvidia-cudnn-cu12",
+            '  export LD_LIBRARY_PATH=$(python3 -c "import nvidia.cublas.lib, nvidia.cudnn.lib; print(nvidia.cublas.lib.__path__[0]+\\\":\\\"+nvidia.cudnn.lib.__path__[0])"):$LD_LIBRARY_PATH',
+            "",
+            "Or full CUDA toolkit:",
+            "  sudo apt-get install -y cuda-toolkit-12-4",
             "",
             "Or force CPU mode: LORE_DEVICE=cpu",
             "Falling back to CPU for now...",
