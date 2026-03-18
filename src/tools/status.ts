@@ -21,10 +21,16 @@ export async function handleStatus(
     indexing: progress.running
       ? (() => {
           const elapsed = Date.now() - progress.startedAt;
-          const done = progress.sessionsIndexed + progress.sessionsSkipped;
-          const rate = done > 0 ? elapsed / done : 0;
-          const remaining = progress.sessionsTotal - done;
-          const etaMs = rate > 0 ? Math.round(remaining * rate) : null;
+          // ETA based on chunks processed (more accurate than session count)
+          const totalChunksProcessed = progress.chunksCreated + progress.currentSessionChunks;
+          const chunksPerMs = totalChunksProcessed > 0 ? totalChunksProcessed / elapsed : 0;
+          // Estimate remaining: current session remaining + unprocessed sessions (estimate avg chunks/session)
+          const currentRemaining = progress.currentSessionTotal - progress.currentSessionChunks;
+          const processedSessions = progress.sessionsIndexed + progress.sessionsSkipped;
+          const remainingSessions = progress.sessionsTotal - processedSessions - 1; // -1 for current
+          const avgChunksPerSession = processedSessions > 0 ? progress.chunksCreated / Math.max(progress.sessionsIndexed, 1) : 0;
+          const estimatedRemainingChunks = currentRemaining + (remainingSessions * avgChunksPerSession);
+          const etaMs = chunksPerMs > 0 ? Math.round(estimatedRemainingChunks / chunksPerMs) : null;
           const etaStr = etaMs !== null
             ? etaMs < 60000 ? `${Math.round(etaMs / 1000)}s` : `${Math.round(etaMs / 60000)}m`
             : "calculating...";
