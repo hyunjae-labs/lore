@@ -1,6 +1,6 @@
 {
   "name": "getlore",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Semantic search MCP server for Claude Code conversation sessions",
   "type": "module",
   "bin": {
