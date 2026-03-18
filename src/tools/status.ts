@@ -40,13 +40,15 @@ export async function handleStatus(
       : progress.completedAt
         ? {
             status: "idle",
-            last_run: `${progress.sessionsIndexed} sessions indexed, ${progress.chunksCreated} chunks in ${progress.completedAt - progress.startedAt}ms`,
+            last_run: `${progress.sessionsIndexed} sessions indexed, ${progress.sessionsSkipped} skipped, ${progress.chunksCreated} chunks in ${progress.completedAt - progress.startedAt}ms`,
             error: progress.error,
+            ...(progress.sessionsSkipped > 0 ? { skip_reasons: progress.skipReasons } : {}),
           }
         : { status: "never_run" },
     db: {
       total_sessions: totalSessions,
       indexed_sessions: indexedSessions,
+      empty_sessions: (db.prepare("SELECT COUNT(*) as c FROM sessions s WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.session_id = s.id)").get() as any).c,
       total_chunks: totalChunks,
       size_mb: dbSizeMb,
     },

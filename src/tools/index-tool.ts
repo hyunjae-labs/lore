@@ -18,6 +18,13 @@ import { loadUserConfig } from "../config.js";
 
 // ── Background indexing state ────────────────────────────────────────────────
 
+export interface SkipReasons {
+  no_parseable_content: number;
+  empty_file: number;
+  read_error: number;
+  no_chunks_after_processing: number;
+}
+
 export interface IndexProgress {
   running: boolean;
   sessionsScanned: number;
@@ -29,6 +36,7 @@ export interface IndexProgress {
   startedAt: number;
   completedAt: number | null;
   error: string | null;
+  skipReasons: SkipReasons;
 }
 
 const progress: IndexProgress = {
@@ -42,6 +50,7 @@ const progress: IndexProgress = {
   startedAt: 0,
   completedAt: null,
   error: null,
+  skipReasons: { no_parseable_content: 0, empty_file: 0, read_error: 0, no_chunks_after_processing: 0 },
 };
 
 export function getIndexProgress(): IndexProgress {
@@ -197,6 +206,7 @@ export async function handleIndex(
   progress.startedAt = Date.now();
   progress.completedAt = null;
   progress.error = null;
+  progress.skipReasons = { no_parseable_content: 0, empty_file: 0, read_error: 0, no_chunks_after_processing: 0 };
 
   // Return immediately, run indexing in background
   runIndexInBackground(db, params, projectSessions, loreDir).catch((err) => {
@@ -286,11 +296,13 @@ async function runIndexInBackground(
           lines = readJsonlFromOffset(sessionInfo.jsonlPath, readOffset);
         } catch {
           progress.sessionsSkipped++;
+          progress.skipReasons.read_error++;
           continue;
         }
 
         if (lines.length === 0) {
           progress.sessionsSkipped++;
+          progress.skipReasons.empty_file++;
           continue;
         }
 
@@ -298,6 +310,7 @@ async function runIndexInBackground(
 
         if (records.length === 0) {
           progress.sessionsSkipped++;
+          progress.skipReasons.no_parseable_content++;
           continue;
         }
 
@@ -325,6 +338,7 @@ async function runIndexInBackground(
 
         if (chunks.length === 0) {
           progress.sessionsSkipped++;
+          progress.skipReasons.no_chunks_after_processing++;
           continue;
         }
 
