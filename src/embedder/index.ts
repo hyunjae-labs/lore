@@ -8,13 +8,42 @@ async function initPipeline(): Promise<FeatureExtractionPipeline> {
   if (extractor) return extractor;
   if (initPromise) return initPromise;
 
-  initPromise = pipeline("feature-extraction", CONFIG.embeddingModel, {
-    dtype: "q8",              // INT8 quantized — 1.5x faster, ~112MB vs 448MB
-    device: "auto",           // Use GPU/CoreML/WebGPU if available, fallback to CPU
-  }).then((p) => {
+  const device = process.env.LORE_DEVICE || "auto";
+
+  initPromise = (async () => {
+    if (device === "auto") {
+      // Try GPU/CoreML first, fallback to CPU if CUDA toolkit missing etc.
+      try {
+        const p = await pipeline("feature-extraction", CONFIG.embeddingModel, {
+          dtype: "q8",
+          device: "auto",
+        });
+        extractor = p as FeatureExtractionPipeline;
+        return extractor;
+      } catch (err) {
+        const msg = String(err);
+        if (msg.includes("libcublasLt") || msg.includes("libcudart") || msg.includes("CUDA") || msg.includes("providers_cuda")) {
+          console.error("[lore] GPU unavailable (CUDA toolkit not installed?), falling back to CPU.");
+        } else {
+          console.error("[lore] Auto device failed, falling back to CPU:", msg.slice(0, 200));
+        }
+        const p = await pipeline("feature-extraction", CONFIG.embeddingModel, {
+          dtype: "q8",
+          device: "cpu",
+        });
+        extractor = p as FeatureExtractionPipeline;
+        return extractor;
+      }
+    }
+
+    // Explicit device from env var (cpu, cuda, coreml, etc.)
+    const p = await pipeline("feature-extraction", CONFIG.embeddingModel, {
+      dtype: "q8",
+      device: device as any,
+    });
     extractor = p as FeatureExtractionPipeline;
     return extractor;
-  });
+  })();
 
   return initPromise;
 }
