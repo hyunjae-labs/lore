@@ -12,7 +12,6 @@ async function initPipeline(): Promise<FeatureExtractionPipeline> {
 
   initPromise = (async () => {
     if (device === "auto") {
-      // Try GPU/CoreML first, fallback to CPU if CUDA toolkit missing etc.
       try {
         const p = await pipeline("feature-extraction", CONFIG.embeddingModel, {
           dtype: "q8",
@@ -22,11 +21,29 @@ async function initPipeline(): Promise<FeatureExtractionPipeline> {
         return extractor;
       } catch (err) {
         const msg = String(err);
-        if (msg.includes("libcublasLt") || msg.includes("libcudart") || msg.includes("CUDA") || msg.includes("providers_cuda")) {
-          console.error("[lore] GPU unavailable (CUDA toolkit not installed?), falling back to CPU.");
+        const isCudaMissing = msg.includes("libcublasLt") || msg.includes("libcudart") ||
+          msg.includes("providers_cuda") || msg.includes("CUDA");
+
+        if (isCudaMissing) {
+          // GPU exists but CUDA toolkit not installed — guide user to fix, don't silently degrade
+          console.error([
+            "[lore] NVIDIA GPU detected but CUDA toolkit is not installed.",
+            "Without CUDA toolkit, indexing will be extremely slow (CPU only).",
+            "",
+            "To install CUDA toolkit on WSL2:",
+            "  wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb",
+            "  sudo dpkg -i cuda-keyring_1.1-1_all.deb",
+            "  sudo apt-get update && sudo apt-get install -y cuda-toolkit-12-4",
+            "  export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH",
+            "",
+            "Or force CPU mode: LORE_DEVICE=cpu",
+            "Falling back to CPU for now...",
+          ].join("\n"));
         } else {
           console.error("[lore] Auto device failed, falling back to CPU:", msg.slice(0, 200));
         }
+
+        // Fallback to CPU — slow but functional
         const p = await pipeline("feature-extraction", CONFIG.embeddingModel, {
           dtype: "q8",
           device: "cpu",
