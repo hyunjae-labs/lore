@@ -18,7 +18,7 @@ Find anything you've ever discussed -- across all projects, all sessions, any br
   Index triggers return instantly. Monitor progress while you keep working. Search what's already indexed while the rest catches up.
 
 - **Project-selective**
-  Register only the projects you care about. Add or remove anytime. Unregistering deletes indexed data to keep things clean.
+  Register only the projects you care about. Add or remove anytime. Unregistering deletes indexed data to keep things clean. Browsing your session inventory also makes it easy to spot stale or unnecessary sessions you may want to clean up.
 
 - **Conversation-aware chunking**
   Splits by logical turns (user question + full assistant response chain), not arbitrary token windows. Handles tool-use chains, thinking blocks, and multi-step interactions correctly.
@@ -37,6 +37,15 @@ claude mcp add -s user lore -- npx getlore
 # Or for a single project
 claude mcp add -s project lore -- npx getlore
 ```
+
+<details>
+<summary>OpenAI Codex CLI</summary>
+
+```bash
+codex mcp add lore -- getlore
+```
+
+</details>
 
 <details>
 <summary>Alternative: global install (faster startup)</summary>
@@ -156,8 +165,8 @@ Delete `~/.lore/lore.db` and re-index. Your source data (`~/.claude/projects/`) 
 ## Development
 
 ```bash
-git clone https://github.com/your-username/getlore.git
-cd getlore/getlore
+git clone https://github.com/hyunjae-labs/lore.git
+cd lore
 npm install
 npm run build
 npm test          # 114 tests
