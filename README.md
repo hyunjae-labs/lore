@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![lore MCP server](https://glama.ai/mcp/servers/hyunjae-labs/lore/badges/score.svg)](https://glama.ai/mcp/servers/hyunjae-labs/lore)
 
 Semantic search across your Claude Code conversations.
 Find anything you've ever discussed -- across all projects, all sessions, any branch.
