@@ -31,31 +31,31 @@ Find anything you've ever discussed -- across all projects, all sessions, any br
 ### Add to Claude Code
 
 ```bash
-# Recommended — always runs latest version, no install needed
+# No install needed — always runs latest version
 claude mcp add -s user lore -- npx getlore
 
-# Or for a single project
+# Or for a single project only
 claude mcp add -s project lore -- npx getlore
 ```
 
-<details>
-<summary>OpenAI Codex CLI</summary>
+### Add to OpenAI Codex CLI
 
 ```bash
-codex mcp add lore -- getlore
+# No install needed
+codex mcp add lore -- npx getlore
 ```
 
-</details>
-
 <details>
-<summary>Alternative: global install (faster startup)</summary>
+<summary>Alternative: global install (faster startup, works offline)</summary>
 
 ```bash
 npm install -g getlore
-claude mcp add -s user lore -- getlore
-```
 
-```bash
+# Then register with your tool:
+claude mcp add -s user lore -- getlore   # Claude Code
+codex mcp add lore -- getlore            # Codex CLI
+
+# Manage your install:
 getlore --version   # Check installed version
 getlore update      # Update to latest
 ```
