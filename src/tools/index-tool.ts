@@ -117,8 +117,16 @@ function readJsonlFromOffset(filePath: string, offset: number): string[] {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+let cancelRequested = false;
+
+export function cancelIndex(): boolean {
+  if (!progress.running) return false;
+  cancelRequested = true;
+  return true;
+}
+
 export interface IndexParams {
-  mode?: "incremental" | "full";
+  mode?: "incremental" | "full" | "cancel";
   project?: string;
 }
 
@@ -126,6 +134,15 @@ export async function handleIndex(
   db: Database.Database,
   params: IndexParams
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
+
+  // Cancel running indexing
+  if (params.mode === "cancel") {
+    if (!progress.running) {
+      return { content: [{ type: "text", text: JSON.stringify({ status: "ok", message: "No indexing in progress." }) }] };
+    }
+    cancelRequested = true;
+    return { content: [{ type: "text", text: JSON.stringify({ status: "ok", message: "Cancellation requested. Indexing will stop after current session completes." }) }] };
+  }
 
   if (progress.running) {
     return {
@@ -255,6 +272,12 @@ async function runIndexInBackground(
       });
 
       for (const sessionInfo of sessions) {
+        // Check for cancellation between sessions
+        if (cancelRequested) {
+          cancelRequested = false;
+          progress.error = "Cancelled by user";
+          return;
+        }
         progress.sessionsScanned++;
 
         const existingSession = db

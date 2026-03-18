@@ -68,7 +68,7 @@ export async function startServer(): Promise<void> {
     "index",
     "Update the search index with recent Claude Code sessions. Call if search returns stale results or the user asks to refresh the index.",
     {
-      mode: z.enum(["incremental", "full"]).optional(),
+      mode: z.enum(["incremental", "full", "cancel"]).optional(),
       project: z.string().optional(),
     },
     async (args): Promise<ToolResult> => {
