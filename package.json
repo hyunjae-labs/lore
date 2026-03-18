@@ -1,0 +1,48 @@
+{
+  "name": "getlore",
+  "version": "0.2.3",
+  "description": "Semantic search MCP server for Claude Code conversation sessions",
+  "type": "module",
+  "bin": {
+    "getlore": "dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyunjae-labs/lore-search.git"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist/",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20 <24"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "search",
+    "semantic",
+    "rag"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "better-sqlite3": "^12.8.0",
+    "sqlite-vec": "^0.1.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
