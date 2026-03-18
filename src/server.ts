@@ -63,18 +63,20 @@ export async function startServer(): Promise<void> {
     }
   );
 
-  // index tool
+  // index tool — description intentionally omits "confirm" param to force user approval for full reindex
   server.tool(
     "index",
-    "Update the search index with recent Claude Code sessions. Call if search returns stale results or the user asks to refresh the index.",
+    "Update the search index with recent Claude Code sessions. Call if search returns stale results or the user asks to refresh the index. Use mode 'cancel' to stop a running index.",
     {
       mode: z.enum(["incremental", "full", "cancel"]).optional(),
       project: z.string().optional(),
+      confirm: z.boolean().optional(),
     },
     async (args): Promise<ToolResult> => {
       return handleIndex(db, {
         mode: args.mode,
         project: args.project,
+        confirm: args.confirm,
       });
     }
   );

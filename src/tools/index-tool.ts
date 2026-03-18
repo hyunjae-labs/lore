@@ -128,12 +128,26 @@ export function cancelIndex(): boolean {
 export interface IndexParams {
   mode?: "incremental" | "full" | "cancel";
   project?: string;
+  confirm?: boolean;
 }
 
 export async function handleIndex(
   db: Database.Database,
   params: IndexParams
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
+
+  // Full reindex requires explicit confirmation (safety gate)
+  if (params.mode === "full" && !params.confirm) {
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          status: "confirmation_required",
+          message: "Full reindex will delete ALL indexed data and rebuild from scratch. This can take several minutes. To proceed, call index with mode 'full' and confirm set to true.",
+        }),
+      }],
+    };
+  }
 
   // Cancel running indexing
   if (params.mode === "cancel") {
