@@ -7,6 +7,8 @@
 Semantic search across your Claude Code conversations.
 Find anything you've ever discussed -- across all projects, all sessions, any branch.
 
+[![lore MCP server](https://glama.ai/mcp/servers/hyunjae-labs/lore/badges/card.svg)](https://glama.ai/mcp/servers/hyunjae-labs/lore)
+
 ## Features
 
 - **Hybrid search (vector + keyword)**
