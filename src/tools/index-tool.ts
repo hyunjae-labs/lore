@@ -126,7 +126,7 @@ export function cancelIndex(): boolean {
 }
 
 export interface IndexParams {
-  mode?: "incremental" | "full" | "cancel";
+  mode?: "incremental" | "rebuild" | "cancel";
   project?: string;
   confirm?: boolean;
 }
@@ -136,14 +136,15 @@ export async function handleIndex(
   params: IndexParams
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
 
-  // Full reindex requires explicit confirmation (safety gate)
-  if (params.mode === "full" && !params.confirm) {
+  // Rebuild requires explicit confirmation (safety gate)
+  // confirm is intentionally excluded from the tool schema so LLMs cannot bypass the gate on first call
+  if (params.mode === "rebuild" && !params.confirm) {
     return {
       content: [{
         type: "text",
         text: JSON.stringify({
           status: "confirmation_required",
-          message: "Full reindex will delete ALL indexed data and rebuild from scratch. This can take several minutes. To proceed, call index with mode 'full' and confirm set to true.",
+          message: "⚠️ Rebuild will delete ALL indexed data and re-index from scratch. This can take several minutes. To proceed, call index again with mode 'rebuild' and confirm set to true.",
         }),
       }],
     };
@@ -309,7 +310,7 @@ async function runIndexInBackground(
           existingOffset
         );
 
-        if (forceMode === "full") {
+        if (forceMode === "rebuild") {
           reindexStrategy = "full";
         }
 

@@ -204,7 +204,7 @@ describe("handleIndex", () => {
   );
 
   it(
-    "re-indexes on full mode (clears old chunks and reindexes)",
+    "re-indexes on rebuild mode (clears old chunks and reindexes)",
     async () => {
       const projectDirName = "-Users-test-myapp3";
       const projectDir = join(projectsDir, projectDirName);
@@ -240,8 +240,8 @@ describe("handleIndex", () => {
       ).count;
       expect(chunksAfterFirst).toBeGreaterThan(0);
 
-      // Full re-index — should clear and rebuild
-      await handleIndex(db, { mode: "full" });
+      // Rebuild — should clear and rebuild
+      await handleIndex(db, { mode: "rebuild" });
       await waitForIndexComplete(60000);
 
       const chunksAfterFull = (

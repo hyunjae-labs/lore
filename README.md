@@ -88,13 +88,13 @@ Claude: [calls lore search] Found 3 relevant conversations...
 | Tool | Purpose |
 |------|---------|
 | `manage_projects` | Register/unregister projects for indexing |
-| `index` | Start background indexing. Modes: `incremental` (default), `full` (requires `confirm: true`), `cancel` |
+| `index` | Start background indexing. Modes: `incremental` (default), `rebuild` (requires `confirm: true`), `cancel` |
 | `status` | Check indexing progress, ETA, skip reasons, DB health |
 | `search` | Semantic + keyword search across conversations |
 | `get_context` | Expand search results with surrounding conversation |
 | `list_sessions` | Browse indexed sessions by project |
 
-> `full` mode requires `confirm: true` as a safety gate — the AI doesn't know about this parameter, so it has to ask you before triggering a destructive reindex.
+> `rebuild` mode requires `confirm: true` as a safety gate — the parameter is hidden from the tool schema, so the AI must ask you before triggering a destructive reindex.
 
 ## Why This Exists
 
