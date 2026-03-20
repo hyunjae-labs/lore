@@ -75,7 +75,7 @@ describe("manage_projects", () => {
   it("add registers a project when exactly 1 match", async () => {
     const db = makeDb();
     // "alpha" matches only "-Users-test-alpha"
-    const response = await handleManageProjects(db, { action: "add", project: "test-alpha" });
+    const response = await handleManageProjects(db, { action: "add", projects: ["test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
@@ -86,14 +86,16 @@ describe("manage_projects", () => {
     db.close();
   });
 
-  it("add returns multiple_matches when ambiguous", async () => {
+  it("add returns ambiguous when query matches multiple projects", async () => {
     const db = makeDb();
     // "test" matches all 3 projects
-    const response = await handleManageProjects(db, { action: "add", project: "test" });
+    const response = await handleManageProjects(db, { action: "add", projects: ["test"] });
     const result = JSON.parse(response.content[0].text);
 
-    expect(result.status).toBe("multiple_matches");
-    expect(result.matches.length).toBeGreaterThan(1);
+    expect(result.status).toBe("ok");
+    expect(result.ambiguous).toBeDefined();
+    expect(result.ambiguous.length).toBe(1);
+    expect(result.ambiguous[0].matches.length).toBeGreaterThan(1);
 
     // Nothing should be registered
     const config = loadUserConfig();
@@ -101,18 +103,19 @@ describe("manage_projects", () => {
     db.close();
   });
 
-  it("add returns error when no project matches", async () => {
+  it("add returns not_found when no project matches", async () => {
     const db = makeDb();
-    const response = await handleManageProjects(db, { action: "add", project: "nonexistent" });
+    const response = await handleManageProjects(db, { action: "add", projects: ["nonexistent"] });
     const result = JSON.parse(response.content[0].text);
 
-    expect(result.error).toBeDefined();
+    expect(result.status).toBe("ok");
+    expect(result.not_found).toContain("nonexistent");
     db.close();
   });
 
   it("list shows registered status after add", async () => {
     const db = makeDb();
-    await handleManageProjects(db, { action: "add", project: "test-alpha" });
+    await handleManageProjects(db, { action: "add", projects: ["test-alpha"] });
 
     const response = await handleManageProjects(db, { action: "list" });
     const result = JSON.parse(response.content[0].text);
@@ -127,11 +130,11 @@ describe("manage_projects", () => {
     const db = makeDb();
     saveUserConfig({ indexed_projects: ["-Users-test-alpha", "-Users-test-beta"], excluded_projects: [] });
 
-    const response = await handleManageProjects(db, { action: "remove", project: "test-alpha" });
+    const response = await handleManageProjects(db, { action: "remove", projects: ["test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
-    expect(result.removed_count).toBe(1);
+    expect(result.removed).toContain("-Users-test-alpha");
 
     const config = loadUserConfig();
     expect(config.indexed_projects).not.toContain("-Users-test-alpha");
@@ -151,11 +154,11 @@ describe("manage_projects", () => {
     });
 
     // Exact match on dir_name — should only remove alpha
-    const response = await handleManageProjects(db, { action: "remove", project: "-Users-test-alpha" });
+    const response = await handleManageProjects(db, { action: "remove", projects: ["-Users-test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
-    expect(result.removed_count).toBe(1);
+    expect(result.removed.length).toBe(1);
 
     const config = loadUserConfig();
     expect(config.indexed_projects).not.toContain("-Users-test-alpha");
@@ -164,7 +167,7 @@ describe("manage_projects", () => {
     db.close();
   });
 
-  it("remove returns multiple_matches when fuzzy match hits multiple projects", async () => {
+  it("remove returns ambiguous when fuzzy match hits multiple projects", async () => {
     const db = makeDb();
     saveUserConfig({
       indexed_projects: ["-Users-test-alpha", "-Users-test-beta", "-Users-test-temp-workspace"],
@@ -172,18 +175,19 @@ describe("manage_projects", () => {
     });
 
     // "test" fuzzy-matches all 3 — should not remove any
-    const response = await handleManageProjects(db, { action: "remove", project: "test" });
+    const response = await handleManageProjects(db, { action: "remove", projects: ["test"] });
     const result = JSON.parse(response.content[0].text);
 
-    expect(result.status).toBe("multiple_matches");
-    expect(result.matches.length).toBeGreaterThan(1);
+    expect(result.status).toBe("ok");
+    expect(result.ambiguous).toBeDefined();
+    expect(result.ambiguous.length).toBe(1);
 
     const config = loadUserConfig();
     expect(config.indexed_projects.length).toBe(3);
     db.close();
   });
 
-  it("add requires project param", async () => {
+  it("add requires projects param", async () => {
     const db = makeDb();
     const response = await handleManageProjects(db, { action: "add" });
     const result = JSON.parse(response.content[0].text);
@@ -207,7 +211,7 @@ describe("manage_projects", () => {
 
   it("exclude marks a project as excluded", async () => {
     const db = makeDb();
-    const response = await handleManageProjects(db, { action: "exclude", project: "test-alpha" });
+    const response = await handleManageProjects(db, { action: "exclude", projects: ["test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
@@ -222,7 +226,7 @@ describe("manage_projects", () => {
     const db = makeDb();
     saveUserConfig({ indexed_projects: ["-Users-test-alpha"], excluded_projects: [] });
 
-    await handleManageProjects(db, { action: "exclude", project: "-Users-test-alpha" });
+    await handleManageProjects(db, { action: "exclude", projects: ["-Users-test-alpha"] });
 
     const config = loadUserConfig();
     expect(config.excluded_projects).toContain("-Users-test-alpha");
@@ -248,7 +252,7 @@ describe("manage_projects", () => {
     const db = makeDb();
     saveUserConfig({ indexed_projects: [], excluded_projects: ["-Users-test-alpha"] });
 
-    const response = await handleManageProjects(db, { action: "include", project: "-Users-test-alpha" });
+    const response = await handleManageProjects(db, { action: "include", projects: ["-Users-test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
@@ -258,12 +262,13 @@ describe("manage_projects", () => {
     db.close();
   });
 
-  it("include returns error when project is not excluded", async () => {
+  it("include returns not_found when project is not excluded", async () => {
     const db = makeDb();
-    const response = await handleManageProjects(db, { action: "include", project: "nonexistent" });
+    const response = await handleManageProjects(db, { action: "include", projects: ["nonexistent"] });
     const result = JSON.parse(response.content[0].text);
 
-    expect(result.error).toBeDefined();
+    expect(result.status).toBe("ok");
+    expect(result.not_found).toContain("nonexistent");
     db.close();
   });
 
@@ -271,7 +276,7 @@ describe("manage_projects", () => {
     const db = makeDb();
     saveUserConfig({ indexed_projects: [], excluded_projects: ["-Users-test-alpha"] });
 
-    await handleManageProjects(db, { action: "add", project: "-Users-test-alpha" });
+    await handleManageProjects(db, { action: "add", projects: ["-Users-test-alpha"] });
 
     const config = loadUserConfig();
     expect(config.indexed_projects).toContain("-Users-test-alpha");
