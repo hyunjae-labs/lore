@@ -1,0 +1,20 @@
+{
+  "name": "getlore",
+  "version": "0.2.20",
+  "description": "Semantic search for Claude Code conversation history with query optimization skill",
+  "author": {
+    "name": "hyunjae-labs",
+    "url": "https://github.com/hyunjae-labs"
+  },
+  "homepage": "https://github.com/hyunjae-labs/lore-search",
+  "repository": "https://github.com/hyunjae-labs/lore-search",
+  "license": "MIT",
+  "keywords": ["mcp", "claude", "search", "semantic", "rag", "lore"],
+  "skills": "./skills/",
+  "mcpServers": {
+    "lore": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"]
+    }
+  }
+}
