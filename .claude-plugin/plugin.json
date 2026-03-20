@@ -1,6 +1,6 @@
 {
   "name": "getlore",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "description": "Semantic search for Claude Code conversation history with query optimization skill",
   "author": {
     "name": "hyunjae-labs",
@@ -13,8 +13,8 @@
   "skills": "./skills/",
   "mcpServers": {
     "lore": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "getlore@latest"]
     }
   }
 }
