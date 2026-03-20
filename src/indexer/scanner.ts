@@ -5,7 +5,7 @@ import { CONFIG } from "../config.js";
 export interface ProjectInfo {
   dirName: string;        // e.g., "-Users-username-01-projects-my-webapp"
   dirPath: string;        // full path to project dir
-  name: string;           // extracted: "my-webapp"
+  name: string;           // full dirPath (unique, no collisions)
 }
 
 export interface SessionInfo {
@@ -33,7 +33,7 @@ export function scanProjects(baseDir?: string): ProjectInfo[] {
     .map((dirName) => ({
       dirName,
       dirPath: join(dir, dirName),
-      name: extractProjectName(dirName),
+      name: join(dir, dirName),
     }));
 }
 
@@ -62,28 +62,17 @@ export function scanSessions(projectDir: string): SessionInfo[] {
     .filter((s): s is SessionInfo => s !== null);
 }
 
-export function extractProjectName(dirName: string): string {
-  // Directory names like "-Users-username-01-projects-my-webapp"
-  // Return last 2 meaningful segments for disambiguation
-  // "workspace" alone is ambiguous; "temp-workspace" or "general-workspace" is not
-  const parts = dirName.split("-").filter(Boolean);
-  if (parts.length >= 2) {
-    return parts.slice(-2).join("-");
-  }
-  return parts[parts.length - 1] || dirName;
-}
-
 export function needsReindex(
   session: SessionInfo,
   existingSize: number | null,
   existingMtime: number | null,
   existingOffset: number
-): "full" | "append" | "skip" {
+): "rebuild" | "append" | "skip" {
   // New session
-  if (existingSize === null) return "full";
+  if (existingSize === null) return "rebuild";
 
   // File shrunk — needs full re-index
-  if (session.size < existingOffset) return "full";
+  if (session.size < existingOffset) return "rebuild";
 
   // File changed (size or mtime differ)
   if (session.size !== existingSize || Math.abs(session.mtime - (existingMtime || 0)) > 1000) {

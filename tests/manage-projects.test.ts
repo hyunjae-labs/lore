@@ -79,7 +79,7 @@ describe("manage_projects", () => {
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
-    expect(result.added).toContain("test-alpha");
+    expect(result.added[0]).toContain("test-alpha");
 
     const config = loadUserConfig();
     expect(config.indexed_projects).toContain("-Users-test-alpha");

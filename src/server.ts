@@ -63,18 +63,19 @@ export async function startServer(): Promise<void> {
     }
   );
 
-  // index tool — confirm param intentionally omitted from schema; LLM learns about it only after the safety-gate response
   server.tool(
     "index",
     "Update the search index with recent Claude Code sessions. Call if search returns stale results or the user asks to refresh the index. Modes: 'incremental' (default, only new/changed), 'rebuild' (⚠️ deletes ALL indexed data and re-indexes from scratch — rarely needed), 'cancel' (stop running index).",
     {
       mode: z.enum(["incremental", "rebuild", "cancel"]).optional(),
       project: z.string().optional(),
+      confirm: z.boolean().optional().describe("Confirmation flag for destructive operations. Only set to true when explicitly instructed by a previous tool response."),
     },
     async (args): Promise<ToolResult> => {
       return handleIndex(db, {
         mode: args.mode,
         project: args.project,
+        confirm: args.confirm,
       });
     }
   );

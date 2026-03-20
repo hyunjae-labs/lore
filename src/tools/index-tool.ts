@@ -311,7 +311,7 @@ async function runIndexInBackground(
         );
 
         if (forceMode === "rebuild") {
-          reindexStrategy = "full";
+          reindexStrategy = "rebuild";
         }
 
         if (reindexStrategy === "skip") {
@@ -328,7 +328,7 @@ async function runIndexInBackground(
         });
 
         let readOffset = existingOffset;
-        if (reindexStrategy === "full") {
+        if (reindexStrategy === "rebuild") {
           deleteSessionChunks(db, sessionDbId);
           readOffset = 0;
         }

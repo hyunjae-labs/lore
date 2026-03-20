@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import {
   scanProjects,
   scanSessions,
-  extractProjectName,
   needsReindex,
 } from "../src/indexer/scanner.js";
 
@@ -47,10 +46,9 @@ describe("scanProjects", () => {
 
     const projects = scanProjects(tempDir);
     expect(projects).toHaveLength(1);
-    expect(projects[0].dirPath).toBe(
-      join(tempDir, "-Users-testuser-01-projects-my-webapp")
-    );
-    expect(projects[0].name).toBe("my-webapp");
+    const expectedPath = join(tempDir, "-Users-testuser-01-projects-my-webapp");
+    expect(projects[0].dirPath).toBe(expectedPath);
+    expect(projects[0].name).toBe(expectedPath);
   });
 
   it("returns empty array when base dir does not exist", () => {
@@ -125,25 +123,6 @@ describe("scanSessions", () => {
   });
 });
 
-describe("extractProjectName", () => {
-  it("extracts last 2 segments from path-encoded dir name", () => {
-    expect(extractProjectName("-Users-testuser-01-projects-my-webapp")).toBe("my-webapp");
-  });
-
-  it("extracts last 2 segments for disambiguation", () => {
-    expect(extractProjectName("-Users-testuser-01-projects-myapp")).toBe("projects-myapp");
-  });
-
-  it("handles multi-word project names with 2 segments", () => {
-    expect(extractProjectName("-Users-testuser-01-projects-temp-workspace2")).toBe("temp-workspace2");
-  });
-
-  it("returns dirName unchanged for empty-filter case", () => {
-    // If splitting by '-' gives all-empty parts, falls back to dirName
-    expect(extractProjectName("")).toBe("");
-  });
-});
-
 describe("needsReindex", () => {
   const makeSession = (size: number, mtime: number) => ({
     sessionId: "test-session",
@@ -152,15 +131,15 @@ describe("needsReindex", () => {
     mtime,
   });
 
-  it('returns "full" for new sessions (existingSize null)', () => {
+  it('returns "rebuild" for new sessions (existingSize null)', () => {
     const session = makeSession(1000, Date.now());
-    expect(needsReindex(session, null, null, 0)).toBe("full");
+    expect(needsReindex(session, null, null, 0)).toBe("rebuild");
   });
 
-  it('returns "full" when file shrunk below existing offset', () => {
+  it('returns "rebuild" when file shrunk below existing offset', () => {
     const session = makeSession(500, Date.now());
     // existingOffset is 800, but new file is 500 bytes — it shrunk
-    expect(needsReindex(session, 800, Date.now(), 800)).toBe("full");
+    expect(needsReindex(session, 800, Date.now(), 800)).toBe("rebuild");
   });
 
   it('returns "append" when file grew (size changed)', () => {

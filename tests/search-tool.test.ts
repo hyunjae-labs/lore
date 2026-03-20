@@ -98,7 +98,6 @@ vi.mock("../src/embedder/index.js", () => ({
 vi.mock("../src/indexer/scanner.js", () => ({
   scanProjects: vi.fn().mockReturnValue([]),
   scanSessions: vi.fn().mockReturnValue([]),
-  extractProjectName: vi.fn((d: string) => d),
   needsReindex: vi.fn().mockReturnValue("skip"),
 }));
 
