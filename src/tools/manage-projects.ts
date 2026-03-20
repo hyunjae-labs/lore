@@ -5,7 +5,7 @@ import { deleteSessionChunks } from "../db/queries.js";
 import { getIndexProgress } from "./index-tool.js";
 
 export interface ManageProjectsParams {
-  action: "add" | "remove" | "list";
+  action: "add" | "remove" | "list" | "exclude" | "include";
   project?: string;
 }
 
@@ -21,22 +21,25 @@ export async function handleManageProjects(
     const projectList = allProjects.map((p) => {
       const sessions = scanSessions(p.dirPath);
       const isRegistered = config.indexed_projects.includes(p.dirName);
+      const isExcluded = config.excluded_projects.includes(p.dirName);
       return {
         dir_name: p.dirName,
         name: p.name,
         session_count: sessions.length,
         registered: isRegistered,
+        excluded: isExcluded,
       };
     });
 
-    // Sort: registered first, then by session count
+    // Sort: registered first, then excluded, then by session count
     projectList.sort((a, b) => {
       if (a.registered !== b.registered) return a.registered ? -1 : 1;
+      if (a.excluded !== b.excluded) return a.excluded ? -1 : 1;
       return b.session_count - a.session_count;
     });
 
-    // Hide projects with 0 sessions (unless registered)
-    const visible = projectList.filter((p) => p.session_count > 0 || p.registered);
+    // Hide projects with 0 sessions (unless registered or excluded)
+    const visible = projectList.filter((p) => p.session_count > 0 || p.registered || p.excluded);
     const hidden = projectList.length - visible.length;
 
     return {
@@ -45,9 +48,10 @@ export async function handleManageProjects(
         text: JSON.stringify({
           total_projects: visible.length,
           registered_count: visible.filter((p) => p.registered).length,
+          excluded_count: visible.filter((p) => p.excluded).length,
           hidden_empty: hidden > 0 ? `${hidden} projects with 0 sessions hidden` : undefined,
           projects: visible,
-          hint: "Use action 'add' with a project name to register for indexing. Use 'remove' to unregister.",
+          hint: "Use action 'add' to register for indexing, 'remove' to unregister, 'exclude' to intentionally exclude, 'include' to restore an excluded project.",
         }, null, 2),
       }],
     };
@@ -113,6 +117,8 @@ export async function handleManageProjects(
       };
     }
 
+    // Remove from excluded if present
+    config.excluded_projects = config.excluded_projects.filter((d) => d !== match.dirName);
     config.indexed_projects.push(match.dirName);
     saveUserConfig(config);
 
@@ -148,24 +154,59 @@ export async function handleManageProjects(
       };
     }
 
-    // Find which dir_names will be removed
-    const removedDirNames: string[] = [];
-    config.indexed_projects = config.indexed_projects.filter(
-      (dirName) => {
-        const proj = allProjects.find((p) => p.dirName === dirName);
-        const name = proj?.name || dirName;
-        const shouldRemove =
-          name.toLowerCase().includes(params.project!.toLowerCase()) ||
-          dirName.toLowerCase().includes(params.project!.toLowerCase());
-        if (shouldRemove) removedDirNames.push(dirName);
-        return !shouldRemove;
-      }
-    );
+    // Find candidates: exact match first, then fuzzy
+    const registeredProjects = config.indexed_projects
+      .map((dirName) => ({ dirName, proj: allProjects.find((p) => p.dirName === dirName) }))
+      .map(({ dirName, proj }) => ({ dirName, name: proj?.name || dirName }));
 
+    const exactMatches = registeredProjects.filter(
+      ({ dirName, name }) =>
+        dirName === params.project! ||
+        name.toLowerCase() === params.project!.toLowerCase()
+    );
+    const candidates = exactMatches.length > 0
+      ? exactMatches
+      : registeredProjects.filter(
+          ({ dirName, name }) =>
+            name.toLowerCase().includes(params.project!.toLowerCase()) ||
+            dirName.toLowerCase().includes(params.project!.toLowerCase())
+        );
+
+    if (candidates.length === 0) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "ok",
+            removed_count: 0,
+            message: "No matching projects found in the registered list.",
+          }),
+        }],
+      };
+    }
+
+    // Multiple fuzzy matches — require user to be more specific
+    if (exactMatches.length === 0 && candidates.length > 1) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "multiple_matches",
+            message: `"${params.project}" matched ${candidates.length} registered projects. Please be more specific or use the exact dir_name.`,
+            matches: candidates.map(({ dirName, name }) => ({ dir_name: dirName, name })),
+          }),
+        }],
+      };
+    }
+
+    // Remove the matched projects
+    const removedDirNames = candidates.map(({ dirName }) => dirName);
+    config.indexed_projects = config.indexed_projects.filter(
+      (dirName) => !removedDirNames.includes(dirName)
+    );
     saveUserConfig(config);
 
     // Delete indexed data from DB for removed projects
-    let chunksDeleted = 0;
     let sessionsDeleted = 0;
     for (const dirName of removedDirNames) {
       const project = db.prepare("SELECT id FROM projects WHERE dir_name = ?").get(dirName) as { id: number } | undefined;
@@ -173,7 +214,6 @@ export async function handleManageProjects(
         const sessions = db.prepare("SELECT id FROM sessions WHERE project_id = ?").all(project.id) as { id: number }[];
         for (const session of sessions) {
           deleteSessionChunks(db, session.id);
-          chunksDeleted++;
         }
         sessionsDeleted += sessions.length;
         db.prepare("DELETE FROM sessions WHERE project_id = ?").run(project.id);
@@ -189,15 +229,144 @@ export async function handleManageProjects(
           removed_count: removedDirNames.length,
           sessions_deleted: sessionsDeleted,
           total_registered: config.indexed_projects.length,
-          message: removedDirNames.length > 0
-            ? `Removed ${removedDirNames.length} project(s) and deleted ${sessionsDeleted} session(s) from index.`
-            : "No matching projects found in the registered list.",
+          message: `Removed ${removedDirNames.length} project(s) and deleted ${sessionsDeleted} session(s) from index.`,
+        }),
+      }],
+    };
+  }
+
+  if (params.action === "exclude") {
+    if (!params.project) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({ error: "project parameter is required for 'exclude' action" }) }],
+      };
+    }
+
+    // Exact match first, then fuzzy
+    const exact = allProjects.filter(
+      (p) =>
+        p.dirName === params.project! ||
+        p.name.toLowerCase() === params.project!.toLowerCase()
+    );
+    const matches = exact.length > 0 ? exact : allProjects.filter(
+      (p) =>
+        p.name.toLowerCase().includes(params.project!.toLowerCase()) ||
+        p.dirName.toLowerCase().includes(params.project!.toLowerCase())
+    );
+
+    if (matches.length === 0) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ error: `No project matching "${params.project}" found.` }),
+        }],
+      };
+    }
+
+    if (exact.length === 0 && matches.length > 1) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "multiple_matches",
+            message: `"${params.project}" matched ${matches.length} projects. Please be more specific or use the exact dir_name.`,
+            matches: matches.map((m) => ({ dir_name: m.dirName, name: m.name })),
+          }),
+        }],
+      };
+    }
+
+    const match = matches[0];
+
+    if (config.excluded_projects.includes(match.dirName)) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ status: "ok", message: `${match.name} is already excluded.` }),
+        }],
+      };
+    }
+
+    // Remove from indexed if registered
+    config.indexed_projects = config.indexed_projects.filter((d) => d !== match.dirName);
+    config.excluded_projects.push(match.dirName);
+    saveUserConfig(config);
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          status: "ok",
+          excluded: match.dirName,
+          message: `${match.name} is now excluded from indexing. Use 'include' to restore it.`,
+        }),
+      }],
+    };
+  }
+
+  if (params.action === "include") {
+    if (!params.project) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({ error: "project parameter is required for 'include' action" }) }],
+      };
+    }
+
+    const excludedProjects = config.excluded_projects
+      .map((dirName) => ({ dirName, proj: allProjects.find((p) => p.dirName === dirName) }))
+      .map(({ dirName, proj }) => ({ dirName, name: proj?.name || dirName }));
+
+    const exactMatches = excludedProjects.filter(
+      ({ dirName, name }) =>
+        dirName === params.project! ||
+        name.toLowerCase() === params.project!.toLowerCase()
+    );
+    const candidates = exactMatches.length > 0
+      ? exactMatches
+      : excludedProjects.filter(
+          ({ dirName, name }) =>
+            name.toLowerCase().includes(params.project!.toLowerCase()) ||
+            dirName.toLowerCase().includes(params.project!.toLowerCase())
+        );
+
+    if (candidates.length === 0) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ error: `No excluded project matching "${params.project}" found.` }),
+        }],
+      };
+    }
+
+    if (exactMatches.length === 0 && candidates.length > 1) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "multiple_matches",
+            message: `"${params.project}" matched ${candidates.length} excluded projects. Please be more specific.`,
+            matches: candidates.map(({ dirName, name }) => ({ dir_name: dirName, name })),
+          }),
+        }],
+      };
+    }
+
+    const match = candidates[0];
+    config.excluded_projects = config.excluded_projects.filter((d) => d !== match.dirName);
+    saveUserConfig(config);
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          status: "ok",
+          included: match.dirName,
+          message: `${match.name} is no longer excluded. Use 'add' to register it for indexing.`,
         }),
       }],
     };
   }
 
   return {
-    content: [{ type: "text", text: JSON.stringify({ error: "Invalid action. Use 'add', 'remove', or 'list'." }) }],
+    content: [{ type: "text", text: JSON.stringify({ error: "Invalid action. Use 'add', 'remove', 'list', 'exclude', or 'include'." }) }],
   };
 }

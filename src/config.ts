@@ -19,11 +19,13 @@ export const CONFIG = {
 // ── User config (persisted in ~/.lore/config.json) ───────────────────────
 
 export interface UserConfig {
-  indexed_projects: string[]; // dir names to index (e.g., "-Users-username-01-projects-myapp")
+  indexed_projects: string[];  // dir names to index (e.g., "-Users-username-01-projects-myapp")
+  excluded_projects: string[]; // dir names intentionally excluded from indexing
 }
 
 const DEFAULT_USER_CONFIG: UserConfig = {
   indexed_projects: [],
+  excluded_projects: [],
 };
 
 function getConfigPath(): string {
@@ -36,6 +38,7 @@ export function loadUserConfig(): UserConfig {
     const parsed = JSON.parse(raw);
     return {
       indexed_projects: Array.isArray(parsed.indexed_projects) ? parsed.indexed_projects : [],
+      excluded_projects: Array.isArray(parsed.excluded_projects) ? parsed.excluded_projects : [],
     };
   } catch {
     return { ...DEFAULT_USER_CONFIG };
