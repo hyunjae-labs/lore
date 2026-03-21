@@ -17,11 +17,14 @@ Find anything you've ever discussed -- across all projects, all sessions, any br
 - **Fully local, zero API keys**
   Everything runs on your machine. ONNX Runtime for embedding, sqlite-vec for storage. No data leaves your device.
 
+- **Auto-index on search**
+  The current session is automatically indexed when you search — no hooks or cron jobs needed. Only the active session is checked (single file stat), so overhead is minimal.
+
 - **Background indexing**
-  Index triggers return instantly. Monitor progress while you keep working. Search what's already indexed while the rest catches up.
+  Manual index triggers return instantly. Monitor progress while you keep working. Search what's already indexed while the rest catches up.
 
 - **Project-selective**
-  Register only the projects you care about. Add or remove anytime. Unregistering deletes indexed data to keep things clean. Browsing your session inventory also makes it easy to spot stale or unnecessary sessions you may want to clean up.
+  Register only the projects you care about. Add or remove anytime. Unregistering deletes indexed data to keep things clean.
 
 - **Conversation-aware chunking**
   Splits by logical turns (user question + full assistant response chain), not arbitrary token windows. Handles tool-use chains, thinking blocks, and multi-step interactions correctly.
@@ -144,7 +147,8 @@ Measured on Apple Silicon (M-series):
 
 | Metric | Value |
 |--------|-------|
-| Search latency | 7-15ms |
+| Search latency (no new content) | 20-30ms |
+| Search latency (with auto-index) | 400-800ms |
 | Index speed | ~10 sessions/sec |
 | First search (cold model load) | ~5s |
 | DB size | ~0.1MB per 10 sessions |
