@@ -1,6 +1,6 @@
 {
   "name": "lore",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "description": "Semantic search for Claude Code conversation history with query optimization skill",
   "author": {
     "name": "hyunjae-labs",
