@@ -1,4 +1,4 @@
-import { openSync, closeSync, unlinkSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { openSync, closeSync, readSync, unlinkSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { CONFIG } from "../config.js";
@@ -15,6 +15,7 @@ import { groupIntoLogicalTurns, chunkTurns } from "../indexer/chunker.js";
 import { getEmbedder } from "../embedder/index.js";
 import { scanProjects, scanSessions, needsReindex } from "../indexer/scanner.js";
 import { loadUserConfig } from "../config.js";
+import { toolResult } from "./helpers.js";
 
 // ── Background indexing state ────────────────────────────────────────────────
 
@@ -103,27 +104,29 @@ function isProcessAlive(pid: number): boolean {
 }
 
 // Clean up lock on exit
-process.on("exit", () => releaseLock(process.env.LORE_DIR ?? CONFIG.loreDir));
-process.on("SIGINT", () => { releaseLock(process.env.LORE_DIR ?? CONFIG.loreDir); process.exit(130); });
-process.on("SIGTERM", () => { releaseLock(process.env.LORE_DIR ?? CONFIG.loreDir); process.exit(143); });
+process.on("exit", () => releaseLock(CONFIG.loreDir));
+process.on("SIGINT", () => { releaseLock(CONFIG.loreDir); process.exit(130); });
+process.on("SIGTERM", () => { releaseLock(CONFIG.loreDir); process.exit(143); });
 
 // ── JSONL reading ────────────────────────────────────────────────────────────
 
 function readJsonlFromOffset(filePath: string, offset: number): string[] {
-  const buffer = readFileSync(filePath);
-  const content = buffer.subarray(offset).toString("utf-8");
-  return content.split("\n").filter((line) => line.trim().length > 0);
+  const fd = openSync(filePath, "r");
+  try {
+    const fileSize = statSync(filePath).size;
+    if (offset >= fileSize) return [];
+    const length = fileSize - offset;
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, offset);
+    return buffer.toString("utf-8").split("\n").filter(Boolean);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
 let cancelRequested = false;
-
-export function cancelIndex(): boolean {
-  if (!progress.running) return false;
-  cancelRequested = true;
-  return true;
-}
 
 export interface IndexParams {
   mode?: "incremental" | "rebuild" | "cancel";
@@ -139,53 +142,38 @@ export async function handleIndex(
   // Rebuild requires explicit confirmation (safety gate)
   // confirm is intentionally excluded from the tool schema so LLMs cannot bypass the gate on first call
   if (params.mode === "rebuild" && !params.confirm) {
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          status: "confirmation_required",
-          message: "⚠️ Rebuild will delete ALL indexed data and re-index from scratch. This can take several minutes. To proceed, call index again with mode 'rebuild' and confirm set to true.",
-        }),
-      }],
-    };
+    return toolResult({
+      status: "confirmation_required",
+      message: "⚠️ Rebuild will delete ALL indexed data and re-index from scratch. This can take several minutes. To proceed, call index again with mode 'rebuild' and confirm set to true.",
+    });
   }
 
   // Cancel running indexing
   if (params.mode === "cancel") {
     if (!progress.running) {
-      return { content: [{ type: "text", text: JSON.stringify({ status: "ok", message: "No indexing in progress." }) }] };
+      return toolResult({ status: "ok", message: "No indexing in progress." });
     }
     cancelRequested = true;
-    return { content: [{ type: "text", text: JSON.stringify({ status: "ok", message: "Cancellation requested. Indexing will stop after current session completes." }) }] };
+    return toolResult({ status: "ok", message: "Cancellation requested. Indexing will stop after current session completes." });
   }
 
   if (progress.running) {
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          status: "already_running",
-          ...getIndexProgress(),
-          elapsed_ms: Date.now() - progress.startedAt,
-          message: `Indexing in progress: ${progress.sessionsIndexed}/${progress.sessionsTotal} sessions. Use list_sessions or search while waiting.`,
-        }),
-      }],
-    };
+    return toolResult({
+      status: "already_running",
+      ...getIndexProgress(),
+      elapsed_ms: Date.now() - progress.startedAt,
+      message: `Indexing in progress: ${progress.sessionsIndexed}/${progress.sessionsTotal} sessions. Use list_sessions or search while waiting.`,
+    });
   }
 
-  const loreDir = process.env.LORE_DIR ?? CONFIG.loreDir;
-  const projectsBaseDir = process.env.CLAUDE_PROJECTS_DIR ?? CONFIG.claudeProjectsDir;
+  const loreDir = CONFIG.loreDir;
+  const projectsBaseDir = CONFIG.claudeProjectsDir;
 
   if (!acquireLock(loreDir)) {
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          status: "locked",
-          message: "Another indexing process is running. Check status with list_sessions.",
-        }),
-      }],
-    };
+    return toolResult({
+      status: "locked",
+      message: "Another indexing process is running. Check status with list_sessions.",
+    });
   }
 
   // Determine which projects to index:
@@ -211,16 +199,11 @@ export async function handleIndex(
   } else {
     // No config, no param — show guidance
     releaseLock(loreDir);
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          status: "no_projects_registered",
-          total_projects_on_disk: allProjects.length,
-          message: "No projects are registered for indexing. Use manage_projects with action 'list' to see available projects, then 'add' to register the ones you want to index.",
-        }),
-      }],
-    };
+    return toolResult({
+      status: "no_projects_registered",
+      total_projects_on_disk: allProjects.length,
+      message: "No projects are registered for indexing. Use manage_projects with action 'list' to see available projects, then 'add' to register the ones you want to index.",
+    });
   }
 
   let totalSessions = 0;
@@ -251,17 +234,12 @@ export async function handleIndex(
     releaseLock(loreDir);
   });
 
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify({
-        status: "started",
-        sessions_found: totalSessions,
-        projects_found: projectSessions.length,
-        message: `Indexing started for ${totalSessions} sessions across ${projectSessions.length} projects. Use list_sessions to check progress. You can search while indexing proceeds.`,
-      }),
-    }],
-  };
+  return toolResult({
+    status: "started",
+    sessions_found: totalSessions,
+    projects_found: projectSessions.length,
+    message: `Indexing started for ${totalSessions} sessions across ${projectSessions.length} projects. Use list_sessions to check progress. You can search while indexing proceeds.`,
+  });
 }
 
 // ── Background indexing ──────────────────────────────────────────────────────

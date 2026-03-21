@@ -2,14 +2,16 @@ import type Database from "better-sqlite3";
 import { statSync } from "node:fs";
 import { CONFIG } from "../config.js";
 import { getIndexProgress } from "./index-tool.js";
+import { getSessionCount, getIndexedSessionCount } from "../db/queries.js";
+import { toolResult } from "./helpers.js";
 
 export async function handleStatus(
   db: Database.Database
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   const progress = getIndexProgress();
 
-  const totalSessions = (db.prepare("SELECT COUNT(*) as c FROM sessions").get() as any).c;
-  const indexedSessions = (db.prepare("SELECT COUNT(*) as c FROM sessions WHERE indexed_at IS NOT NULL").get() as any).c;
+  const totalSessions = getSessionCount(db);
+  const indexedSessions = getIndexedSessionCount(db);
   const totalChunks = (db.prepare("SELECT COUNT(*) as c FROM chunks").get() as any).c;
 
   let dbSizeMb = 0;
@@ -63,7 +65,5 @@ export async function handleStatus(
     },
   };
 
-  return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-  };
+  return toolResult(result);
 }

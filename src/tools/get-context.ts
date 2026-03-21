@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { getAdjacentChunks } from "../db/queries.js";
 import type { ChunkRow } from "../db/queries.js";
+import { toolResult, toolError } from "./helpers.js";
 
 export interface GetContextParams {
   chunk_id: number;
@@ -13,11 +14,7 @@ export async function handleGetContext(
   params: GetContextParams
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   if (!params.chunk_id) {
-    return {
-      content: [
-        { type: "text", text: JSON.stringify({ error: "chunk_id is required" }) },
-      ],
-    };
+    return toolError("chunk_id is required");
   }
 
   const direction = params.direction || "both";
@@ -31,11 +28,7 @@ export async function handleGetContext(
     .get(params.chunk_id) as ChunkRow | undefined;
 
   if (!anchor) {
-    return {
-      content: [
-        { type: "text", text: JSON.stringify({ error: "Chunk not found" }) },
-      ],
-    };
+    return toolError("Chunk not found");
   }
 
   // Fetch adjacent chunks according to direction
@@ -81,5 +74,5 @@ export async function handleGetContext(
     project: session?.project || "",
   };
 
-  return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  return toolResult(result);
 }

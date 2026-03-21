@@ -221,14 +221,32 @@ export function vectorSearch(
 
   if (rrfScores.size === 0) return [];
 
-  // Use RRF scores for final ranking, keep distance map for display score
+  // Use RRF scores for final ranking
   const allRowids = [...rrfScores.keys()];
 
-  const distanceMap = new Map(vecRows.map((r) => [r.rowid, r.distance]));
-
-  // Step 2: Hydrate with chunk + session + project data
+  // Step 2: Hydrate with chunk + session + project data (filters pushed into SQL)
   const placeholders = allRowids.map(() => "?").join(",");
-  const hydrateStmt = db.prepare(`
+  const conditions: string[] = [`c.id IN (${placeholders})`];
+  const queryParams: any[] = [...allRowids];
+
+  if (params.projectName) {
+    conditions.push(`LOWER(p.name) LIKE ?`);
+    queryParams.push(`%${params.projectName.toLowerCase()}%`);
+  }
+  if (params.branch) {
+    conditions.push(`s.branch = ?`);
+    queryParams.push(params.branch);
+  }
+  if (params.after) {
+    conditions.push(`c.timestamp >= ?`);
+    queryParams.push(params.after);
+  }
+  if (params.before) {
+    conditions.push(`c.timestamp <= ?`);
+    queryParams.push(params.before);
+  }
+
+  const hydrationSql = `
     SELECT
       c.id, c.session_id, c.chunk_index, c.role, c.content,
       c.timestamp, c.turn_start, c.turn_end, c.token_count,
@@ -237,10 +255,10 @@ export function vectorSearch(
     FROM chunks c
     JOIN sessions s ON c.session_id = s.id
     JOIN projects p ON s.project_id = p.id
-    WHERE c.id IN (${placeholders})
-  `);
+    WHERE ${conditions.join(" AND ")}
+  `;
 
-  const hydratedRows = hydrateStmt.all(...allRowids) as (ChunkRow & {
+  const filtered = db.prepare(hydrationSql).all(...queryParams) as (ChunkRow & {
     project_name: string;
     project_path: string;
     session_uuid: string;
@@ -250,41 +268,8 @@ export function vectorSearch(
     turn_count: number;
   })[];
 
-  // Step 3: Post-filter in JS
-  let filtered = hydratedRows;
-
-  if (params.projectName) {
-    const pn = params.projectName.toLowerCase();
-    filtered = filtered.filter((r) =>
-      r.project_name.toLowerCase().includes(pn)
-    );
-  }
-
-  if (params.branch) {
-    filtered = filtered.filter((r) => r.branch === params.branch);
-  }
-
-  if (params.after) {
-    const afterDate = new Date(params.after).getTime();
-    filtered = filtered.filter((r) => {
-      if (!r.timestamp) return false;
-      return new Date(r.timestamp).getTime() >= afterDate;
-    });
-  }
-
-  if (params.before) {
-    const beforeDate = new Date(params.before).getTime();
-    filtered = filtered.filter((r) => {
-      if (!r.timestamp) return false;
-      return new Date(r.timestamp).getTime() <= beforeDate;
-    });
-  }
-
   // Step 4: Check adjacent chunks existence
-  const hasBeforeStmt = db.prepare(`
-    SELECT 1 FROM chunks WHERE session_id = ? AND chunk_index = ? LIMIT 1
-  `);
-  const hasAfterStmt = db.prepare(`
+  const hasAdjacentStmt = db.prepare(`
     SELECT 1 FROM chunks WHERE session_id = ? AND chunk_index = ? LIMIT 1
   `);
 
@@ -296,8 +281,8 @@ export function vectorSearch(
     const rrfScore = rrfScores.get(row.id) || 0;
     const score = Math.round((rrfScore / maxRrf) * 100) / 100;
 
-    const hasBefore = hasBeforeStmt.get(row.session_id, row.chunk_index - 1) !== undefined;
-    const hasAfter = hasAfterStmt.get(row.session_id, row.chunk_index + 1) !== undefined;
+    const hasBefore = hasAdjacentStmt.get(row.session_id, row.chunk_index - 1) !== undefined;
+    const hasAfter = hasAdjacentStmt.get(row.session_id, row.chunk_index + 1) !== undefined;
 
     const turnStart = row.turn_start ?? "?";
     const turnEnd = row.turn_end ?? "?";

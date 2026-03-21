@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { loadUserConfig } from "../config.js";
+import { toolResult } from "./helpers.js";
 
 export interface ListSessionsParams {
   project?: string;
@@ -77,5 +78,5 @@ export async function handleListSessions(
     })),
   };
 
-  return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  return toolResult(result);
 }

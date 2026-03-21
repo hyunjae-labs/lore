@@ -29,6 +29,7 @@ export function getDb(dbPath: string): Database.Database {
   return db;
 }
 
+/** Used by CLI index subcommand for clean shutdown */
 export function closeDb(): void {
   if (db) {
     db.close();

@@ -6,6 +6,7 @@ import { vectorSearch } from "../db/queries.js";
 import type { SearchResult } from "../db/queries.js";
 import { scanProjects, scanSessions } from "../indexer/scanner.js";
 import { handleIndex, waitForIndexComplete } from "./index-tool.js";
+import { toolResult, toolError } from "./helpers.js";
 
 export interface SearchParams {
   query: string;
@@ -83,7 +84,7 @@ export async function handleSearch(
 
   // 1. Validate query
   if (!params.query || params.query.trim().length === 0) {
-    throw new Error("query parameter is required and must be non-empty");
+    return toolError("query parameter is required and must be non-empty");
   }
 
   // 2. Clamp limit
@@ -93,17 +94,18 @@ export async function handleSearch(
   );
 
   // 3. Check indexed session count
-  const indexedCount = getIndexedSessionCount(db);
+  let indexedCount = getIndexedSessionCount(db);
 
   if (indexedCount === 0) {
-    // Count what's on disk
+    // Count what's on disk (cached for reuse below)
     const sessionsOnDisk = countSessionsOnDisk();
 
     if (sessionsOnDisk <= CONFIG.autoIndexThreshold) {
       // Auto-index then search — must wait for background completion
       await handleIndex(db, { mode: "incremental" });
       await waitForIndexComplete(30000);
-      // Fall through — indexedCount will now be non-zero
+      // Refresh count after auto-indexing
+      indexedCount = getIndexedSessionCount(db);
     } else {
       // Too many sessions; require explicit index
       const response: SearchResponse = {
@@ -111,9 +113,7 @@ export async function handleSearch(
         message: `No sessions have been indexed yet. Found ${sessionsOnDisk} sessions on disk. Run the index tool first.`,
         sessions_found: sessionsOnDisk,
       };
-      return {
-        content: [{ type: "text", text: JSON.stringify(response) }],
-      };
+      return toolResult(response);
     }
   }
 
@@ -135,10 +135,9 @@ export async function handleSearch(
   // 6. Format results
   const formatted = results.map(formatResult);
 
-  // 7. Check for stale sessions
-  const currentIndexedCount = getIndexedSessionCount(db);
+  // 7. Check for stale sessions — indexedCount is already refreshed after auto-indexing
   const sessionsOnDiskNow = countSessionsOnDisk();
-  const unindexedCount = sessionsOnDiskNow - currentIndexedCount;
+  const unindexedCount = sessionsOnDiskNow - indexedCount;
 
   let note: string | undefined;
   if (unindexedCount > 0) {
@@ -151,13 +150,11 @@ export async function handleSearch(
     status: "ok",
     query: params.query,
     query_time_ms: queryTimeMs,
-    total_indexed_sessions: currentIndexedCount,
+    total_indexed_sessions: indexedCount,
     result_count: formatted.length,
     results: formatted,
     ...(note ? { note } : {}),
   };
 
-  return {
-    content: [{ type: "text", text: JSON.stringify(response) }],
-  };
+  return toolResult(response);
 }

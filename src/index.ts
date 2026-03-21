@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { startServer } from "./server.js";
+import { CONFIG } from "./config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8"));
@@ -33,6 +34,32 @@ if (args.includes("update")) {
   } catch {
     console.error("Update failed. Try manually: npm install -g getlore@latest");
   }
+  process.exit(0);
+}
+
+if (args[0] === "index") {
+  // Parse CLI flags
+  const modeIdx = args.indexOf("--mode");
+  const mode = modeIdx !== -1 && args[modeIdx + 1] ? args[modeIdx + 1] : "incremental";
+  const projectIdx = args.indexOf("--project");
+  const project = projectIdx !== -1 && args[projectIdx + 1] ? args[projectIdx + 1] : undefined;
+
+  const { getDb, closeDb } = await import("./db/index.js");
+  const { handleIndex, waitForIndexComplete, getIndexProgress } = await import("./tools/index-tool.js");
+
+  const db = getDb(CONFIG.dbPath);
+  const result = await handleIndex(db, { mode: mode as any, project });
+
+  const resultData = JSON.parse(result.content[0].text);
+  console.error(`lore: ${resultData.message || resultData.status}`);
+
+  if (resultData.status === "started") {
+    await waitForIndexComplete();
+    const final = getIndexProgress();
+    console.error(`lore: done — ${final.sessionsIndexed} indexed, ${final.sessionsSkipped} skipped, ${final.chunksCreated} chunks`);
+  }
+
+  closeDb();
   process.exit(0);
 }
 

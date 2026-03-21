@@ -29,7 +29,7 @@ const DEFAULT_USER_CONFIG: UserConfig = {
 };
 
 function getConfigPath(): string {
-  return join(process.env.LORE_DIR || CONFIG.loreDir, "config.json");
+  return join(CONFIG.loreDir, "config.json");
 }
 
 export function loadUserConfig(): UserConfig {
@@ -46,7 +46,7 @@ export function loadUserConfig(): UserConfig {
 }
 
 export function saveUserConfig(config: UserConfig): void {
-  const dir = process.env.LORE_DIR || CONFIG.loreDir;
+  const dir = CONFIG.loreDir;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(getConfigPath(), JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
 }
