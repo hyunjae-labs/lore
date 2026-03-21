@@ -1,5 +1,5 @@
-import { openSync, closeSync, readSync, unlinkSync, readFileSync, writeFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { openSync, closeSync, readSync, unlinkSync, readFileSync, writeFileSync, statSync, readdirSync } from "node:fs";
+import { join, basename } from "node:path";
 import type Database from "better-sqlite3";
 import { CONFIG } from "../config.js";
 import {
@@ -14,6 +14,7 @@ import { parseLine } from "../indexer/parser.js";
 import { groupIntoLogicalTurns, chunkTurns } from "../indexer/chunker.js";
 import { getEmbedder } from "../embedder/index.js";
 import { scanProjects, scanSessions, needsReindex } from "../indexer/scanner.js";
+import type { SessionInfo } from "../indexer/scanner.js";
 import { loadUserConfig } from "../config.js";
 import { toolResult } from "./helpers.js";
 
@@ -110,6 +111,54 @@ process.on("SIGTERM", () => { releaseLock(CONFIG.loreDir); process.exit(143); })
 
 // ── Lightweight single-session indexing (for search-time auto-index) ─────────
 
+/**
+ * Find only the sessions worth stat()ing: new files not in DB + the most recently active known session.
+ * This avoids stat()ing every JSONL file on every search — only O(new_files + 1) stats instead of O(all).
+ */
+function findCandidateSessions(db: Database.Database, projectDir: string, projectId: number): SessionInfo[] {
+  // 1. readdir (no stat, fast)
+  let files: string[];
+  try {
+    files = readdirSync(projectDir).filter(name => name.endsWith(".jsonl") && !name.startsWith("."));
+  } catch {
+    return [];
+  }
+
+  // 2. Get all known session IDs for this project from DB
+  const knownRows = db
+    .prepare("SELECT session_id, jsonl_mtime FROM sessions WHERE project_id = ?")
+    .all(projectId) as Array<{ session_id: string; jsonl_mtime: number | null }>;
+  const knownSet = new Set(knownRows.map(r => r.session_id));
+
+  const candidates: SessionInfo[] = [];
+
+  // 3. New sessions (not in DB) — must stat to get size/mtime
+  for (const name of files) {
+    const sessionId = basename(name, ".jsonl");
+    if (!knownSet.has(sessionId)) {
+      const fullPath = join(projectDir, name);
+      try {
+        const stat = statSync(fullPath);
+        candidates.push({ sessionId, jsonlPath: fullPath, size: stat.size, mtime: stat.mtimeMs });
+      } catch { /* skip unreadable files */ }
+    }
+  }
+
+  // 4. Most recently active known session — stat only this one
+  if (knownRows.length > 0) {
+    const mostRecent = knownRows.reduce((a, b) =>
+      (a.jsonl_mtime ?? 0) > (b.jsonl_mtime ?? 0) ? a : b
+    );
+    const fullPath = join(projectDir, mostRecent.session_id + ".jsonl");
+    try {
+      const stat = statSync(fullPath);
+      candidates.push({ sessionId: mostRecent.session_id, jsonlPath: fullPath, size: stat.size, mtime: stat.mtimeMs });
+    } catch { /* file may have been deleted */ }
+  }
+
+  return candidates;
+}
+
 export async function indexStaleSessions(db: Database.Database): Promise<number> {
   const userConfig = loadUserConfig();
   if (userConfig.indexed_projects.length === 0) return 0;
@@ -122,14 +171,16 @@ export async function indexStaleSessions(db: Database.Database): Promise<number>
   const embedder = await getEmbedder();
 
   for (const project of projectsToIndex) {
-    const sessions = scanSessions(project.dirPath);
     const projectId = upsertProject(db, {
       dir_name: project.dirName,
       path: project.dirPath,
       name: project.name,
     });
 
-    for (const sessionInfo of sessions) {
+    // Only stat candidates: new sessions + the most recently active session
+    const candidates = findCandidateSessions(db, project.dirPath, projectId);
+
+    for (const sessionInfo of candidates) {
       const existingSession = db
         .prepare("SELECT * FROM sessions WHERE session_id = ?")
         .get(sessionInfo.sessionId) as SessionRow | undefined;
