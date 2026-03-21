@@ -18,7 +18,7 @@ Find anything you've ever discussed -- across all projects, all sessions, any br
   Everything runs on your machine. ONNX Runtime for embedding, sqlite-vec for storage. No data leaves your device.
 
 - **Auto-index on search**
-  The current session is automatically indexed when you search — no hooks or cron jobs needed. Only the active session is checked (single file stat), so overhead is minimal.
+  Search returns instantly using the existing index. The current session is then indexed in the background so new content appears in the next search. No hooks, no cron jobs, no blocking.
 
 - **Background indexing**
   Manual index triggers return instantly. Monitor progress while you keep working. Search what's already indexed while the rest catches up.
@@ -147,8 +147,7 @@ Measured on Apple Silicon (M-series):
 
 | Metric | Value |
 |--------|-------|
-| Search latency (no new content) | 20-30ms |
-| Search latency (with auto-index) | 400-800ms |
+| Search latency | 20-30ms |
 | Index speed | ~10 sessions/sec |
 | First search (cold model load) | ~5s |
 | DB size | ~0.1MB per 10 sessions |
