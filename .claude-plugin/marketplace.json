@@ -1,0 +1,20 @@
+{
+  "name": "getlore-marketplace",
+  "owner": {
+    "name": "hyunjae-labs",
+    "url": "https://github.com/hyunjae-labs"
+  },
+  "metadata": {
+    "description": "Semantic search for Claude Code conversation history",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "getlore",
+      "source": ".",
+      "description": "Semantic search for Claude Code conversation history with query optimization skill",
+      "version": "0.2.21",
+      "author": { "name": "hyunjae-labs" }
+    }
+  ]
+}

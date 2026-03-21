@@ -6,8 +6,8 @@
     "name": "hyunjae-labs",
     "url": "https://github.com/hyunjae-labs"
   },
-  "homepage": "https://github.com/hyunjae-labs/lore-search",
-  "repository": "https://github.com/hyunjae-labs/lore-search",
+  "homepage": "https://github.com/hyunjae-labs/lore",
+  "repository": "https://github.com/hyunjae-labs/lore",
   "license": "MIT",
   "keywords": ["mcp", "claude", "search", "semantic", "rag", "lore"],
   "skills": "./skills/",
