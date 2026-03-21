@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "getlore",
-      "source": ".",
+      "source": "./",
       "description": "Semantic search for Claude Code conversation history with query optimization skill",
       "version": "0.2.21",
       "author": { "name": "hyunjae-labs" }
