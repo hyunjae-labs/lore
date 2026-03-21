@@ -4,8 +4,8 @@ import { getEmbedder } from "../embedder/index.js";
 import { getIndexedSessionCount } from "../db/queries.js";
 import { vectorSearch } from "../db/queries.js";
 import type { SearchResult } from "../db/queries.js";
-import { scanProjects, scanSessions } from "../indexer/scanner.js";
-import { handleIndex, waitForIndexComplete } from "./index-tool.js";
+import { scanProjects, scanSessions, needsReindex } from "../indexer/scanner.js";
+import { handleIndex, waitForIndexComplete, indexStaleSessions } from "./index-tool.js";
 import { toolResult, toolError } from "./helpers.js";
 
 export interface SearchParams {
@@ -93,21 +93,16 @@ export async function handleSearch(
     CONFIG.searchMaxLimit
   );
 
-  // 3. Check indexed session count
+  // 3. Auto-index stale sessions before searching
   let indexedCount = getIndexedSessionCount(db);
 
   if (indexedCount === 0) {
-    // Count what's on disk (cached for reuse below)
     const sessionsOnDisk = countSessionsOnDisk();
-
     if (sessionsOnDisk <= CONFIG.autoIndexThreshold) {
-      // Auto-index then search — must wait for background completion
       await handleIndex(db, { mode: "incremental" });
       await waitForIndexComplete(30000);
-      // Refresh count after auto-indexing
       indexedCount = getIndexedSessionCount(db);
     } else {
-      // Too many sessions; require explicit index
       const response: SearchResponse = {
         status: "index_required",
         message: `No sessions have been indexed yet. Found ${sessionsOnDisk} sessions on disk. Run the index tool first.`,
@@ -115,6 +110,10 @@ export async function handleSearch(
       };
       return toolResult(response);
     }
+  } else {
+    // Index any sessions with new content since last index
+    await indexStaleSessions(db);
+    indexedCount = getIndexedSessionCount(db);
   }
 
   // 4. Embed the query with the required prefix

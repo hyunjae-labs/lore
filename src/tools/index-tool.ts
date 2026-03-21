@@ -108,6 +108,134 @@ process.on("exit", () => releaseLock(CONFIG.loreDir));
 process.on("SIGINT", () => { releaseLock(CONFIG.loreDir); process.exit(130); });
 process.on("SIGTERM", () => { releaseLock(CONFIG.loreDir); process.exit(143); });
 
+// ── Lightweight single-session indexing (for search-time auto-index) ─────────
+
+export async function indexStaleSessions(db: Database.Database): Promise<number> {
+  const userConfig = loadUserConfig();
+  if (userConfig.indexed_projects.length === 0) return 0;
+
+  const allProjects = scanProjects(CONFIG.claudeProjectsDir);
+  const registered = new Set(userConfig.indexed_projects);
+  const projectsToIndex = allProjects.filter((p) => registered.has(p.dirName));
+
+  let totalIndexed = 0;
+  const embedder = await getEmbedder();
+
+  for (const project of projectsToIndex) {
+    const sessions = scanSessions(project.dirPath);
+    const projectId = upsertProject(db, {
+      dir_name: project.dirName,
+      path: project.dirPath,
+      name: project.name,
+    });
+
+    for (const sessionInfo of sessions) {
+      const existingSession = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionInfo.sessionId) as SessionRow | undefined;
+
+      const existingSize = existingSession?.jsonl_size ?? null;
+      const existingMtime = existingSession?.jsonl_mtime ?? null;
+      const existingOffset = existingSession?.indexed_offset ?? 0;
+
+      const strategy = needsReindex(sessionInfo, existingSize, existingMtime, existingOffset);
+      if (strategy === "skip") continue;
+
+      const sessionDbId = upsertSession(db, {
+        project_id: projectId,
+        session_id: sessionInfo.sessionId,
+        jsonl_path: sessionInfo.jsonlPath,
+        jsonl_size: sessionInfo.size,
+        jsonl_mtime: sessionInfo.mtime,
+      });
+
+      let readOffset = existingOffset;
+      if (strategy === "rebuild") {
+        deleteSessionChunks(db, sessionDbId);
+        readOffset = 0;
+      }
+
+      let lines: string[];
+      try {
+        lines = readJsonlFromOffset(sessionInfo.jsonlPath, readOffset);
+      } catch { continue; }
+      if (lines.length === 0) continue;
+
+      const records = lines.map((line) => parseLine(line)).filter((r) => r !== null);
+      if (records.length === 0) continue;
+
+      let intent: string | null = null;
+      let branch: string | null = null;
+      let model: string | null = null;
+      let startedAt: string | null = null;
+      let endedAt: string | null = null;
+
+      for (const record of records) {
+        if (record.timestamp) {
+          if (!startedAt) startedAt = record.timestamp;
+          endedAt = record.timestamp;
+        }
+        if (intent === null && record.type === "user" && !record.isToolResult && record.text) {
+          intent = record.text.slice(0, 200);
+        }
+        if (branch === null && record.gitBranch) branch = record.gitBranch;
+        if (model === null && record.model) model = record.model;
+      }
+
+      const turns = groupIntoLogicalTurns(records);
+      const chunks = chunkTurns(turns, CONFIG.maxChunkTokens, CONFIG.shortTurnThreshold);
+      if (chunks.length === 0) continue;
+
+      const textsToEmbed = chunks.map((chunk) => `passage: ${chunk.content}`);
+      const embeddings = await embedder.embedBatch(textsToEmbed);
+
+      let chunkIndexOffset = 0;
+      if (strategy === "append" && existingSession) {
+        const maxChunkRow = db
+          .prepare("SELECT MAX(chunk_index) as max_idx FROM chunks WHERE session_id = ?")
+          .get(sessionDbId) as { max_idx: number | null };
+        chunkIndexOffset = (maxChunkRow.max_idx ?? -1) + 1;
+      }
+
+      const insertAllChunks = db.transaction(() => {
+        for (let i = 0; i < chunks.length; i++) {
+          insertChunkWithVector(db, {
+            session_id: sessionDbId,
+            chunk_index: chunkIndexOffset + i,
+            role: chunks[i].role,
+            content: chunks[i].content,
+            timestamp: chunks[i].timestamp || null,
+            turn_start: chunks[i].turnStart,
+            turn_end: chunks[i].turnEnd,
+            token_count: chunks[i].tokenCount,
+            embedding: embeddings[i],
+          });
+        }
+      });
+      insertAllChunks();
+
+      const newOffset = statSync(sessionInfo.jsonlPath).size;
+      updateSessionMetadata(db, {
+        session_id: sessionDbId,
+        indexed_offset: newOffset,
+        indexed_at: new Date().toISOString(),
+        turn_count: turns.length,
+        started_at: startedAt,
+        ended_at: endedAt,
+        branch,
+        model,
+        intent,
+        jsonl_size: sessionInfo.size,
+        jsonl_mtime: sessionInfo.mtime,
+      });
+
+      totalIndexed++;
+    }
+  }
+
+  return totalIndexed;
+}
+
 // ── JSONL reading ────────────────────────────────────────────────────────────
 
 function readJsonlFromOffset(filePath: string, offset: number): string[] {
