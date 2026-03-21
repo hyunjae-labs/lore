@@ -1,5 +1,5 @@
 {
-  "name": "getlore",
+  "name": "lore",
   "version": "0.2.21",
   "description": "Semantic search for Claude Code conversation history with query optimization skill",
   "author": {

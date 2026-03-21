@@ -10,7 +10,7 @@
   },
   "plugins": [
     {
-      "name": "getlore",
+      "name": "lore",
       "source": "./",
       "description": "Semantic search for Claude Code conversation history with query optimization skill",
       "version": "0.2.21",
