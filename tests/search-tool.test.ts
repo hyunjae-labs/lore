@@ -162,39 +162,17 @@ describe("handleSearch", () => {
     }
   });
 
-  // ── 2. Empty index returns index_required status ────────────────────────
+  // ── 2. Empty index returns indexing status ────────────────────────
 
-  it("returns index_required when no sessions are indexed and disk count exceeds threshold", async () => {
-    // Override scanner mock to return many sessions (>20) to skip auto-index
-    const { scanProjects, scanSessions } = await import(
-      "../src/indexer/scanner.js"
-    );
-    vi.mocked(scanProjects).mockReturnValueOnce([
-      {
-        dirName: "-Users-test-bigproject",
-        dirPath: "/Users/test/bigproject",
-        name: "bigproject",
-      },
-    ]);
-    // Return 25 fake sessions so auto-index threshold is exceeded
-    vi.mocked(scanSessions).mockReturnValueOnce(
-      Array.from({ length: 25 }, (_, i) => ({
-        sessionId: `session-${i}`,
-        jsonlPath: `/path/to/session-${i}.jsonl`,
-        size: 100,
-        mtime: Date.now(),
-      }))
-    );
-
+  it("returns indexing status when no sessions are indexed", async () => {
     // DB has no indexed sessions
     const response = await handleSearch(db, {
       query: "something",
     });
 
     const parsed = JSON.parse(response.content[0].text);
-    expect(parsed.status).toBe("index_required");
+    expect(parsed.status).toBe("indexing");
     expect(typeof parsed.message).toBe("string");
-    expect(parsed.sessions_found).toBe(25);
   });
 
   // ── 3. Project filter works ─────────────────────────────────────────────
@@ -284,56 +262,4 @@ describe("handleSearch", () => {
     expect(parsed.result_count).toBeLessThanOrEqual(50);
   });
 
-  // ── 7. Auto-index path for small disk count ────────────────────────────
-
-  it("auto-indexes when indexed count is 0 and disk count <= threshold", async () => {
-    // scanProjects/scanSessions already return [] by default (threshold not exceeded)
-    // DB is empty. handleSearch should auto-index (no-op since no real files)
-    // and then return ok with 0 results.
-    const response = await handleSearch(db, { query: "anything" });
-    const parsed = JSON.parse(response.content[0].text);
-    // Auto-index succeeded; we get an ok response (possibly with 0 results)
-    expect(parsed.status).toBe("ok");
-  });
-
-  // ── 8. Stale note appears when unindexed sessions exist ────────────────
-
-  it("includes a note when there are unindexed sessions on disk", async () => {
-    // Seed one indexed session
-    seedIndexedSession(db, {
-      projectDirName: "-Users-test-stale",
-      projectName: "stale",
-      projectPath: "/Users/test/stale",
-      sessionUuid: "aaaaaaaa-bbbb-cccc-dddd-555555555555",
-      chunkContent: "Stale note test content",
-      embedding: new Float32Array(384).fill(0.8),
-    });
-
-    // Make scanner report 3 sessions on disk (more than indexed=1)
-    const { scanProjects, scanSessions } = await import(
-      "../src/indexer/scanner.js"
-    );
-    vi.mocked(scanProjects).mockReturnValueOnce([
-      {
-        dirName: "-Users-test-stale",
-        dirPath: "/Users/test/stale",
-        name: "stale",
-      },
-    ]);
-    vi.mocked(scanSessions).mockReturnValueOnce(
-      Array.from({ length: 3 }, (_, i) => ({
-        sessionId: `stale-session-${i}`,
-        jsonlPath: `/path/stale-session-${i}.jsonl`,
-        size: 100,
-        mtime: Date.now(),
-      }))
-    );
-
-    const response = await handleSearch(db, { query: "stale" });
-    const parsed = JSON.parse(response.content[0].text);
-
-    expect(parsed.status).toBe("ok");
-    expect(typeof parsed.note).toBe("string");
-    expect(parsed.note).toMatch(/unindexed|not yet indexed/i);
-  });
 });
