@@ -28,6 +28,7 @@ export async function startServer(): Promise<void> {
     {
       query: z.string(),
       project: z.string().optional(),
+      session: z.string().optional().describe("Filter by session ID (UUID). Use list_sessions to find session IDs."),
       branch: z.string().optional(),
       after: z.string().optional(),
       before: z.string().optional(),
@@ -37,6 +38,7 @@ export async function startServer(): Promise<void> {
       return handleSearch(db, {
         query: args.query,
         project: args.project,
+        session: args.session,
         branch: args.branch,
         after: args.after,
         before: args.before,

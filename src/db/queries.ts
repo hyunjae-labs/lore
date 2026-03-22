@@ -172,6 +172,7 @@ export function vectorSearch(
     query: string;
     limit: number;
     projectName?: string;
+    sessionId?: string;
     branch?: string;
     after?: string;
     before?: string;
@@ -232,6 +233,10 @@ export function vectorSearch(
   if (params.projectName) {
     conditions.push(`LOWER(p.name) LIKE ?`);
     queryParams.push(`%${params.projectName.toLowerCase()}%`);
+  }
+  if (params.sessionId) {
+    conditions.push(`s.session_id = ?`);
+    queryParams.push(params.sessionId);
   }
   if (params.branch) {
     conditions.push(`s.branch = ?`);

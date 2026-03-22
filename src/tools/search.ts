@@ -11,6 +11,7 @@ import { toolResult, toolError } from "./helpers.js";
 export interface SearchParams {
   query: string;
   project?: string;
+  session?: string;
   branch?: string;
   after?: string;
   before?: string;
@@ -123,6 +124,7 @@ export async function handleSearch(
     query: params.query,
     limit,
     projectName: params.project,
+    sessionId: params.session,
     branch: params.branch,
     after: params.after,
     before: params.before,
