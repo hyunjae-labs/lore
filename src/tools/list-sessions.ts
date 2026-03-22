@@ -15,13 +15,17 @@ export async function handleListSessions(
   const limit = Math.min(params.limit || 20, 100);
   const sortDir = params.sort === "oldest" ? "ASC" : "DESC";
 
-  let filterClause = "";
+  const filterConditions: string[] = [
+    "(SELECT COUNT(*) FROM chunks c WHERE c.session_id = s.id) > 0",
+  ];
   const queryParams: unknown[] = [];
 
   if (params.project) {
-    filterClause = "WHERE p.name LIKE ?";
+    filterConditions.push("p.name LIKE ?");
     queryParams.push(`%${params.project}%`);
   }
+
+  const filterClause = "WHERE " + filterConditions.join(" AND ");
 
   const sessions = db
     .prepare(
@@ -38,13 +42,13 @@ export async function handleListSessions(
     .all(...queryParams, limit) as any[];
 
   const totalSessions = (
-    db.prepare("SELECT COUNT(*) as count FROM sessions").get() as any
+    db.prepare("SELECT COUNT(*) as count FROM sessions s WHERE EXISTS (SELECT 1 FROM chunks c WHERE c.session_id = s.id)").get() as any
   ).count;
 
   const totalIndexed = (
     db
       .prepare(
-        "SELECT COUNT(*) as count FROM sessions WHERE indexed_at IS NOT NULL"
+        "SELECT COUNT(*) as count FROM sessions s WHERE s.indexed_at IS NOT NULL AND EXISTS (SELECT 1 FROM chunks c WHERE c.session_id = s.id)"
       )
       .get() as any
   ).count;

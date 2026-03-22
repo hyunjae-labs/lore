@@ -5,7 +5,7 @@ import { getIndexedSessionCount } from "../db/queries.js";
 import { vectorSearch } from "../db/queries.js";
 import type { SearchResult } from "../db/queries.js";
 import { scanProjects, scanSessions } from "../indexer/scanner.js";
-import { handleIndex, waitForIndexComplete, indexStaleSessions } from "./index-tool.js";
+import { handleIndex, waitForIndexComplete } from "./index-tool.js";
 import { toolResult, toolError } from "./helpers.js";
 
 export interface SearchParams {
@@ -154,8 +154,8 @@ export async function handleSearch(
     ...(note ? { note } : {}),
   };
 
-  // 8. Fire-and-forget: index current session in background for next search
-  indexStaleSessions(db).catch(() => {});
+  // 8. Fire-and-forget: full incremental index in background for next search
+  handleIndex(db, {}).catch(() => {});
 
   return toolResult(response);
 }

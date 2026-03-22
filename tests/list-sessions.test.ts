@@ -125,6 +125,7 @@ describe("handleListSessions", () => {
       projectName: "proj-a",
       projectPath: "/Users/test/a",
       sessionUuid: "summary-session-a",
+      chunkCount: 1,
       indexed: true,
     });
     seedSession(db, {
@@ -132,6 +133,7 @@ describe("handleListSessions", () => {
       projectName: "proj-b",
       projectPath: "/Users/test/b",
       sessionUuid: "summary-session-b",
+      chunkCount: 1,
       indexed: false,
     });
 
@@ -150,12 +152,14 @@ describe("handleListSessions", () => {
       projectName: "alpha-project",
       projectPath: "/Users/test/alpha",
       sessionUuid: "filter-session-alpha",
+      chunkCount: 1,
     });
     seedSession(db, {
       projectDirName: "-Users-test-beta",
       projectName: "beta-project",
       projectPath: "/Users/test/beta",
       sessionUuid: "filter-session-beta",
+      chunkCount: 1,
     });
 
     const response = await handleListSessions(db, { project: "alpha" });
@@ -175,6 +179,7 @@ describe("handleListSessions", () => {
         projectPath: `/Users/test/lim-${i}`,
         sessionUuid: `limit-session-${i}`,
         startedAt: `2024-01-${String(i + 1).padStart(2, "0")}T10:00:00.000Z`,
+        chunkCount: 1,
       });
     }
 
@@ -192,6 +197,7 @@ describe("handleListSessions", () => {
       projectName: "cap-proj",
       projectPath: "/Users/test/cap",
       sessionUuid: "cap-session-001",
+      chunkCount: 1,
     });
 
     // Should not throw; just verify it runs without error
@@ -209,6 +215,7 @@ describe("handleListSessions", () => {
       projectPath: "/Users/test/sort-a",
       sessionUuid: "sort-session-older",
       startedAt: "2024-01-01T10:00:00.000Z",
+      chunkCount: 1,
     });
     seedSession(db, {
       projectDirName: "-Users-test-sort-b",
@@ -216,6 +223,7 @@ describe("handleListSessions", () => {
       projectPath: "/Users/test/sort-b",
       sessionUuid: "sort-session-newer",
       startedAt: "2024-06-01T10:00:00.000Z",
+      chunkCount: 1,
     });
 
     const response = await handleListSessions(db, { sort: "recent" });
@@ -235,6 +243,7 @@ describe("handleListSessions", () => {
       projectPath: "/Users/test/old-a",
       sessionUuid: "oldest-session-first",
       startedAt: "2024-01-01T10:00:00.000Z",
+      chunkCount: 1,
     });
     seedSession(db, {
       projectDirName: "-Users-test-old-b",
@@ -242,6 +251,7 @@ describe("handleListSessions", () => {
       projectPath: "/Users/test/old-b",
       sessionUuid: "oldest-session-second",
       startedAt: "2024-06-01T10:00:00.000Z",
+      chunkCount: 1,
     });
 
     const response = await handleListSessions(db, { sort: "oldest" });
@@ -260,12 +270,14 @@ describe("handleListSessions", () => {
       projectName: "proj1",
       projectPath: "/Users/test/proj1",
       sessionUuid: "proj-summary-s1",
+      chunkCount: 1,
     });
     seedSession(db, {
       projectDirName: "-Users-test-proj2",
       projectName: "proj2",
       projectPath: "/Users/test/proj2",
       sessionUuid: "proj-summary-s2",
+      chunkCount: 1,
     });
     // Add a second session to proj1
     seedSession(db, {
@@ -273,6 +285,7 @@ describe("handleListSessions", () => {
       projectName: "proj1",
       projectPath: "/Users/test/proj1",
       sessionUuid: "proj-summary-s3",
+      chunkCount: 1,
     });
 
     const response = await handleListSessions(db, {});
@@ -311,6 +324,7 @@ describe("handleListSessions", () => {
       projectName: "bool-proj",
       projectPath: "/Users/test/bool",
       sessionUuid: "bool-indexed-session",
+      chunkCount: 1,
       indexed: true,
     });
     seedSession(db, {
@@ -318,6 +332,7 @@ describe("handleListSessions", () => {
       projectName: "bool-proj2",
       projectPath: "/Users/test/bool2",
       sessionUuid: "bool-unindexed-session",
+      chunkCount: 1,
       indexed: false,
     });
 
