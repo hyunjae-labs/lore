@@ -16,6 +16,7 @@ import { getEmbedder } from "../embedder/index.js";
 import { scanProjects, scanSessions, needsReindex } from "../indexer/scanner.js";
 import type { SessionInfo } from "../indexer/scanner.js";
 import { loadUserConfig, saveUserConfig } from "../config.js";
+import { pathToDirName } from "../utils/path.js";
 import { toolResult } from "./helpers.js";
 
 // ── Background indexing state ────────────────────────────────────────────────
@@ -353,8 +354,9 @@ function readJsonlFromOffset(filePath: string, offset: number): string[] {
 let cancelRequested = false;
 
 export interface IndexParams {
-  mode?: "incremental" | "rebuild" | "cancel";
+  mode?: "rebuild" | "cancel";
   project?: string;
+  scope?: "all";
   confirm?: boolean;
 }
 
@@ -401,32 +403,51 @@ export async function handleIndex(
   }
 
   // Determine which projects to index:
-  // 1. If params.project specified → only that project (overrides config)
-  // 2. Else if config.indexed_projects is non-empty → only registered projects
-  // 3. Else → nothing (user must register projects first)
+  // 1. scope "all" → register all projects and index them
+  // 2. params.project → auto-register that project and index it
+  // 3. config.indexed_projects non-empty → only registered projects
+  // 4. nothing → show guidance
   const allProjects = scanProjects(projectsBaseDir);
   const userConfig = loadUserConfig();
 
-  let projectsToIndex = allProjects;
+  let projectsToIndex: typeof allProjects;
 
-  if (params.project) {
-    // Explicit project filter — overrides config
-    projectsToIndex = allProjects.filter(
-      (p) =>
-        p.name.toLowerCase().includes(params.project!.toLowerCase()) ||
-        p.dirName.toLowerCase().includes(params.project!.toLowerCase())
-    );
+  if (params.scope === "all") {
+    projectsToIndex = allProjects;
+    const newlyAdded: string[] = [];
+    for (const p of allProjects) {
+      if (!userConfig.indexed_projects.includes(p.dirName)) {
+        userConfig.indexed_projects.push(p.dirName);
+        newlyAdded.push(p.dirName);
+      }
+    }
+    if (newlyAdded.length > 0) {
+      saveUserConfig(userConfig);
+    }
+  } else if (params.project) {
+    const dirName = pathToDirName(params.project);
+    const found = allProjects.find((p) => p.dirName === dirName || p.dirName === params.project);
+    if (!found) {
+      releaseLock(loreDir);
+      return toolResult({
+        status: "not_found",
+        message: `Project not found: ${params.project}`,
+      });
+    }
+    if (!userConfig.indexed_projects.includes(found.dirName)) {
+      userConfig.indexed_projects.push(found.dirName);
+      saveUserConfig(userConfig);
+    }
+    projectsToIndex = [found];
   } else if (userConfig.indexed_projects.length > 0) {
-    // Config-based filter
     const registered = new Set(userConfig.indexed_projects);
     projectsToIndex = allProjects.filter((p) => registered.has(p.dirName));
   } else {
-    // No config, no param — show guidance
     releaseLock(loreDir);
     return toolResult({
-      status: "no_projects_registered",
+      status: "no_projects_added",
       total_projects_on_disk: allProjects.length,
-      message: "No projects are registered for indexing. Use manage_projects with action 'list' to see available projects, then 'add' to register the ones you want to index.",
+      message: "No projects are added for indexing. Use manage_projects 'add' or pass scope 'all' to index everything.",
     });
   }
 
@@ -493,7 +514,7 @@ async function runIndexInBackground(
   projectSessions: Array<{ project: { dirName: string; dirPath: string; name: string }; sessions: Array<{ sessionId: string; jsonlPath: string; size: number; mtime: number }> }>,
   loreDir: string,
 ): Promise<void> {
-  const forceMode = params.mode ?? "incremental";
+  const forceMode = params.mode ?? "default";
 
   try {
     const embedder = await getEmbedder();

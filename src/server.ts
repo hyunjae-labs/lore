@@ -67,16 +67,18 @@ export async function startServer(): Promise<void> {
 
   server.tool(
     "index",
-    "Update the search index with recent Claude Code sessions. Call if search returns stale results or the user asks to refresh the index. Modes: 'incremental' (default, only new/changed), 'rebuild' (⚠️ deletes ALL indexed data and re-indexes from scratch — rarely needed), 'cancel' (stop running index).",
+    "Index Claude Code sessions for search. No params = update added projects. Pass 'project' with a path to auto-add and index a specific project. Pass scope 'all' to add and index all projects.",
     {
-      mode: z.enum(["incremental", "rebuild", "cancel"]).optional(),
-      project: z.string().optional(),
-      confirm: z.boolean().optional().describe("Confirmation flag for destructive operations. Only set to true when explicitly instructed by a previous tool response."),
+      mode: z.enum(["rebuild", "cancel"]).optional(),
+      project: z.string().optional().describe("Project path (e.g., '/Users/me/my-app') or dir_name to auto-add and index."),
+      scope: z.enum(["all"]).optional().describe("Set to 'all' to register and index all projects."),
+      confirm: z.boolean().optional().describe("Confirmation flag for rebuild. Only set true when instructed by a previous response."),
     },
     async (args): Promise<ToolResult> => {
       return handleIndex(db, {
         mode: args.mode,
         project: args.project,
+        scope: args.scope,
         confirm: args.confirm,
       });
     }

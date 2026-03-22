@@ -101,7 +101,7 @@ export async function handleSearch(
     // First time: must index before searching (no existing data to search)
     const sessionsOnDisk = countSessionsOnDisk();
     if (sessionsOnDisk <= CONFIG.autoIndexThreshold) {
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(30000);
       indexedCount = getIndexedSessionCount(db);
     } else {

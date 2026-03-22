@@ -7,7 +7,7 @@ import {
   beforeAll,
 } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, existsSync, unlinkSync } from "node:fs";
-import { saveUserConfig } from "../src/config.js";
+import { loadUserConfig, saveUserConfig } from "../src/config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -63,9 +63,12 @@ let tempDir: string;
 let projectsDir: string;
 let loreDir: string;
 
+let testCounter = 0;
+
 beforeEach(() => {
   const ts = Date.now();
-  tempDir = join(tmpdir(), `lore-index-test-${ts}`);
+  testCounter++;
+  tempDir = join(tmpdir(), `lore-index-test-${ts}-${testCounter}`);
   projectsDir = join(tempDir, "projects");
   loreDir = join(tempDir, "lore");
 
@@ -75,6 +78,9 @@ beforeEach(() => {
   // Point CONFIG env vars to temp dirs so CONFIG picks them up
   process.env.CLAUDE_PROJECTS_DIR = projectsDir;
   process.env.LORE_DIR = loreDir;
+
+  // Ensure a clean config for each test
+  saveUserConfig({ indexed_projects: [] });
 });
 
 afterEach(() => {
@@ -115,7 +121,7 @@ describe("handleIndex", () => {
 
       const db = makeDb();
 
-      const response = await handleIndex(db, { mode: "incremental" });
+      const response = await handleIndex(db, {});
 
       // Response should return immediately with "started" status
       expect(response.content).toHaveLength(1);
@@ -180,7 +186,7 @@ describe("handleIndex", () => {
       const db = makeDb();
 
       // First index run
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(60000);
 
       const chunksAfterFirst = (
@@ -189,7 +195,7 @@ describe("handleIndex", () => {
       expect(chunksAfterFirst).toBeGreaterThan(0);
 
       // Second index run — file unchanged, should skip
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(60000);
 
       // Chunk count must not grow
@@ -232,7 +238,7 @@ describe("handleIndex", () => {
       const db = makeDb();
 
       // First index run
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(60000);
 
       const chunksAfterFirst = (
@@ -261,10 +267,10 @@ describe("handleIndex", () => {
       // No projects registered in config
       const db = makeDb();
 
-      const response = await handleIndex(db, { mode: "incremental" });
+      const response = await handleIndex(db, {});
       const result = JSON.parse(response.content[0].text);
 
-      expect(result.status).toBe("no_projects_registered");
+      expect(result.status).toBe("no_projects_added");
 
       db.close();
     },
@@ -285,7 +291,7 @@ describe("handleIndex", () => {
       );
 
       const db = makeDb();
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(30000);
 
       // Lock file should be removed after completion
@@ -298,11 +304,13 @@ describe("handleIndex", () => {
   );
 
   it(
-    "filters by project name when project param provided",
+    "filters by project dirName when project param provided",
     async () => {
       // Two projects
-      const projectDirA = join(projectsDir, "-Users-test-alpha");
-      const projectDirB = join(projectsDir, "-Users-test-beta");
+      const projectDirNameA = "-Users-test-alpha";
+      const projectDirNameB = "-Users-test-beta";
+      const projectDirA = join(projectsDir, projectDirNameA);
+      const projectDirB = join(projectsDir, projectDirNameB);
       mkdirSync(projectDirA, { recursive: true });
       mkdirSync(projectDirB, { recursive: true });
 
@@ -328,10 +336,9 @@ describe("handleIndex", () => {
 
       const db = makeDb();
 
-      // Index only "alpha" project
+      // Index only "alpha" project by dirName — auto-adds it
       await handleIndex(db, {
-        mode: "incremental",
-        project: "alpha",
+        project: projectDirNameA,
       });
       await waitForIndexComplete(60000);
 
@@ -345,6 +352,113 @@ describe("handleIndex", () => {
 
       expect(alphaSession).toBeDefined();
       expect(betaSession).toBeUndefined();
+
+      db.close();
+    },
+    60000
+  );
+
+  it(
+    "scope 'all' registers all projects and indexes them",
+    async () => {
+      // Create two projects on disk
+      const projectDirNameA = "-Users-test-scopeall-a";
+      const projectDirNameB = "-Users-test-scopeall-b";
+      mkdirSync(join(projectsDir, projectDirNameA), { recursive: true });
+      mkdirSync(join(projectsDir, projectDirNameB), { recursive: true });
+
+      const sidA = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0a1";
+      const sidB = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0b1";
+      const ts = "2024-07-01T10:00:00.000Z";
+
+      writeFileSync(
+        join(projectsDir, projectDirNameA, `${sidA}.jsonl`),
+        [
+          makeUserLine("Scope all test A", sidA, ts),
+          makeAssistantLine("Answer A", sidA, ts),
+        ].join("\n") + "\n"
+      );
+
+      writeFileSync(
+        join(projectsDir, projectDirNameB, `${sidB}.jsonl`),
+        [
+          makeUserLine("Scope all test B", sidB, ts),
+          makeAssistantLine("Answer B", sidB, ts),
+        ].join("\n") + "\n"
+      );
+
+      // No projects registered initially
+      const configBefore = loadUserConfig();
+      expect(configBefore.indexed_projects.length).toBe(0);
+
+      const db = makeDb();
+
+      const response = await handleIndex(db, { scope: "all" });
+      const result = JSON.parse(response.content[0].text);
+      expect(result.status).toBe("started");
+
+      await waitForIndexComplete(30000);
+
+      // All projects should now be registered in config
+      const configAfter = loadUserConfig();
+      expect(configAfter.indexed_projects.length).toBeGreaterThan(0);
+      expect(configAfter.indexed_projects).toContain(projectDirNameA);
+      expect(configAfter.indexed_projects).toContain(projectDirNameB);
+
+      // Both sessions should be indexed
+      const sessionA = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sidA);
+      const sessionB = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sidB);
+      expect(sessionA).toBeDefined();
+      expect(sessionB).toBeDefined();
+
+      db.close();
+    },
+    60000
+  );
+
+  it(
+    "project param auto-adds and indexes specific project",
+    async () => {
+      const projectDirName = "-Users-test-autoadd";
+      const projectDir = join(projectsDir, projectDirName);
+      mkdirSync(projectDir, { recursive: true });
+
+      const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0c1";
+      const ts = "2024-08-01T10:00:00.000Z";
+
+      writeFileSync(
+        join(projectDir, `${sessionId}.jsonl`),
+        [
+          makeUserLine("Auto-add test question", sessionId, ts),
+          makeAssistantLine("Auto-add test answer", sessionId, ts),
+        ].join("\n") + "\n"
+      );
+
+      // No projects registered initially
+      const configBefore = loadUserConfig();
+      expect(configBefore.indexed_projects.length).toBe(0);
+
+      const db = makeDb();
+
+      // Pass the dirName directly as project param — should auto-add
+      const response = await handleIndex(db, { project: projectDirName });
+      const result = JSON.parse(response.content[0].text);
+      expect(result.status).toBe("started");
+
+      await waitForIndexComplete(30000);
+
+      const configAfter = loadUserConfig();
+      expect(configAfter.indexed_projects).toContain(projectDirName);
+
+      // Session should be indexed
+      const session = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionId);
+      expect(session).toBeDefined();
 
       db.close();
     },
@@ -377,7 +491,7 @@ describe("handleIndex", () => {
       const db = makeDb();
 
       // 1. Index the session
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(60000);
 
       // 2. Verify it was indexed
@@ -396,7 +510,7 @@ describe("handleIndex", () => {
       unlinkSync(jsonlPath);
 
       // 4. Run incremental again — should prune the orphan
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(60000);
 
       // 5. Verify the session and its chunks were pruned from DB
@@ -451,7 +565,7 @@ describe("handleIndex", () => {
       const db = makeDb();
 
       // 1. Index everything
-      await handleIndex(db, { mode: "incremental" });
+      await handleIndex(db, {});
       await waitForIndexComplete(60000);
 
       // 2. Verify both sessions were indexed

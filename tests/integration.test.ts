@@ -206,7 +206,7 @@ describe("lore full pipeline integration", () => {
   it(
     "handleIndex: creates sessions and chunks from JSONL files",
     async () => {
-      const response = await handleIndex(db, { mode: "incremental" });
+      const response = await handleIndex(db, {});
       const result = JSON.parse(response.content[0].text);
       expect(result.status).toBe("started");
 
