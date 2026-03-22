@@ -1,0 +1,20 @@
+{
+  "name": "lore",
+  "version": "0.2.26",
+  "description": "Semantic search skill + MCP server for Claude Code conversation history",
+  "author": {
+    "name": "hyunjae-labs",
+    "url": "https://github.com/hyunjae-labs"
+  },
+  "homepage": "https://github.com/hyunjae-labs/lore",
+  "repository": "https://github.com/hyunjae-labs/lore",
+  "license": "MIT",
+  "keywords": ["skill", "mcp", "claude", "search", "semantic", "rag", "lore"],
+  "skills": "./skills/",
+  "mcpServers": {
+    "lore": {
+      "command": "npx",
+      "args": ["-y", "getlore@latest"]
+    }
+  }
+}
