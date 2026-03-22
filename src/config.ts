@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 export const CONFIG = {
-  loreDir: process.env.LORE_DIR || join(homedir(), ".lore"),
-  dbPath: process.env.LORE_DB || join(homedir(), ".lore", "lore.db"),
-  claudeProjectsDir: process.env.CLAUDE_PROJECTS_DIR || join(homedir(), ".claude", "projects"),
+  get loreDir() { return process.env.LORE_DIR || join(homedir(), ".lore"); },
+  get dbPath() { return process.env.LORE_DB || join(homedir(), ".lore", "lore.db"); },
+  get claudeProjectsDir() { return process.env.CLAUDE_PROJECTS_DIR || join(homedir(), ".claude", "projects"); },
   embeddingModel: "Xenova/multilingual-e5-small",
   embeddingDimensions: 384,
   maxChunkTokens: 1000,

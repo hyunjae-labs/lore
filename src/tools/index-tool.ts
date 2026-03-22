@@ -15,7 +15,7 @@ import { groupIntoLogicalTurns, chunkTurns } from "../indexer/chunker.js";
 import { getEmbedder } from "../embedder/index.js";
 import { scanProjects, scanSessions, needsReindex } from "../indexer/scanner.js";
 import type { SessionInfo } from "../indexer/scanner.js";
-import { loadUserConfig } from "../config.js";
+import { loadUserConfig, saveUserConfig } from "../config.js";
 import { toolResult } from "./helpers.js";
 
 // ── Background indexing state ────────────────────────────────────────────────
@@ -287,6 +287,51 @@ export async function indexStaleSessions(db: Database.Database): Promise<number>
   return totalIndexed;
 }
 
+// ── Orphan pruning ───────────────────────────────────────────────────────────
+
+/**
+ * Remove DB sessions whose JSONL files no longer exist on disk.
+ * For each project: readdir -> compare with DB -> delete orphans.
+ * If directory is gone, all sessions for that project are orphans.
+ */
+function pruneOrphanSessions(
+  db: Database.Database,
+  projectsToIndex: Array<{ dirName: string; dirPath: string; name: string }>
+): number {
+  let pruned = 0;
+
+  for (const project of projectsToIndex) {
+    const projectRow = db
+      .prepare("SELECT id FROM projects WHERE dir_name = ?")
+      .get(project.dirName) as { id: number } | undefined;
+    if (!projectRow) continue;
+
+    const dbSessions = db
+      .prepare("SELECT id, session_id FROM sessions WHERE project_id = ?")
+      .all(projectRow.id) as Array<{ id: number; session_id: string }>;
+    if (dbSessions.length === 0) continue;
+
+    let diskFiles: Set<string>;
+    try {
+      const files = readdirSync(project.dirPath)
+        .filter((name) => name.endsWith(".jsonl") && !name.startsWith("."));
+      diskFiles = new Set(files.map((f) => basename(f, ".jsonl")));
+    } catch {
+      diskFiles = new Set();
+    }
+
+    for (const dbSession of dbSessions) {
+      if (!diskFiles.has(dbSession.session_id)) {
+        deleteSessionChunks(db, dbSession.id);
+        db.prepare("DELETE FROM sessions WHERE id = ?").run(dbSession.id);
+        pruned++;
+      }
+    }
+  }
+
+  return pruned;
+}
+
 // ── JSONL reading ────────────────────────────────────────────────────────────
 
 function readJsonlFromOffset(filePath: string, offset: number): string[] {
@@ -385,6 +430,25 @@ export async function handleIndex(
     });
   }
 
+  // Prune config entries for projects whose directories no longer exist
+  const allDirNames = new Set(allProjects.map((p) => p.dirName));
+  const staleProjects = userConfig.indexed_projects.filter((d) => !allDirNames.has(d));
+  if (staleProjects.length > 0) {
+    for (const dirName of staleProjects) {
+      const projectRow = db.prepare("SELECT id FROM projects WHERE dir_name = ?").get(dirName) as { id: number } | undefined;
+      if (projectRow) {
+        const sessions = db.prepare("SELECT id FROM sessions WHERE project_id = ?").all(projectRow.id) as { id: number }[];
+        for (const session of sessions) {
+          deleteSessionChunks(db, session.id);
+        }
+        db.prepare("DELETE FROM sessions WHERE project_id = ?").run(projectRow.id);
+        db.prepare("DELETE FROM projects WHERE id = ?").run(projectRow.id);
+      }
+    }
+    userConfig.indexed_projects = userConfig.indexed_projects.filter((d) => allDirNames.has(d));
+    saveUserConfig(userConfig);
+  }
+
   let totalSessions = 0;
   const projectSessions: Array<{ project: typeof allProjects[0]; sessions: ReturnType<typeof scanSessions> }> = [];
   for (const project of projectsToIndex) {
@@ -433,6 +497,10 @@ async function runIndexInBackground(
 
   try {
     const embedder = await getEmbedder();
+
+    // Prune sessions whose JSONL files no longer exist on disk
+    const projectInfos = projectSessions.map(({ project }) => project);
+    pruneOrphanSessions(db, projectInfos);
 
     for (const { project, sessions } of projectSessions) {
       progress.currentProject = project.name;

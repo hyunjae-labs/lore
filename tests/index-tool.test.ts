@@ -6,7 +6,7 @@ import {
   afterEach,
   beforeAll,
 } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, unlinkSync } from "node:fs";
 import { saveUserConfig } from "../src/config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -345,6 +345,70 @@ describe("handleIndex", () => {
 
       expect(alphaSession).toBeDefined();
       expect(betaSession).toBeUndefined();
+
+      db.close();
+    },
+    60000
+  );
+
+  it(
+    "incremental prunes sessions whose JSONL was deleted from disk",
+    async () => {
+      const projectDirName = "-Users-test-pruneapp";
+      const projectDir = join(projectsDir, projectDirName);
+      mkdirSync(projectDir, { recursive: true });
+      saveUserConfig({ indexed_projects: [projectDirName] });
+
+      const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee06";
+      const ts1 = "2024-05-01T10:00:00.000Z";
+      const ts2 = "2024-05-01T10:00:05.000Z";
+
+      const jsonlPath = join(projectDir, `${sessionId}.jsonl`);
+      const lines = [
+        makeUserLine("How do I prune orphan sessions?", sessionId, ts1),
+        makeAssistantLine(
+          "You compare disk files with DB records and delete orphans.",
+          sessionId,
+          ts2
+        ),
+      ];
+      writeFileSync(jsonlPath, lines.join("\n") + "\n");
+
+      const db = makeDb();
+
+      // 1. Index the session
+      await handleIndex(db, { mode: "incremental" });
+      await waitForIndexComplete(60000);
+
+      // 2. Verify it was indexed
+      const sessionBefore = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionId) as any;
+      expect(sessionBefore).toBeDefined();
+      expect(sessionBefore.indexed_at).not.toBeNull();
+
+      const chunksBefore = db
+        .prepare("SELECT COUNT(*) as count FROM chunks WHERE session_id = ?")
+        .get(sessionBefore.id) as { count: number };
+      expect(chunksBefore.count).toBeGreaterThan(0);
+
+      // 3. Delete the JSONL file from disk
+      unlinkSync(jsonlPath);
+
+      // 4. Run incremental again — should prune the orphan
+      await handleIndex(db, { mode: "incremental" });
+      await waitForIndexComplete(60000);
+
+      // 5. Verify the session and its chunks were pruned from DB
+      const sessionAfter = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionId);
+      expect(sessionAfter).toBeUndefined();
+
+      const chunksAfter = db
+        .prepare("SELECT COUNT(*) as count FROM chunks WHERE session_id = ?")
+        .get(sessionBefore.id) as { count: number };
+      expect(chunksAfter.count).toBe(0);
 
       db.close();
     },
