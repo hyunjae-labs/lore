@@ -129,7 +129,7 @@ When a result is relevant but truncated (`has_more_before`/`has_more_after` is t
 
 ## Indexing: Getting Data Ready for Search
 
-Before searching, sessions must be indexed. Lore auto-indexes on search when ≤20 sessions exist, but for larger setups:
+Before searching, sessions must be indexed. Lore auto-indexes added projects in the background on every search. For explicit control:
 
 | User says | Action |
 |-----------|--------|
