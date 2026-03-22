@@ -103,10 +103,10 @@ export async function startServer(): Promise<void> {
   // manage_projects tool
   server.tool(
     "manage_projects",
-    "Manage which projects are registered for indexing. Use 'list' to see all projects on disk and their registration status. Use 'add' to register a project for indexing. Use 'remove' to unregister. Projects must be registered before they can be indexed.",
+    "Manage which projects are registered for indexing. Use 'list' to see all projects and their added status. Use 'add' with project paths to register. Use 'remove' to unregister and clean up indexed data.",
     {
-      action: z.enum(["add", "remove", "list", "exclude", "include"]),
-      projects: z.array(z.string()).optional().describe("Project dir_names or search queries to process. Supports batch: pass multiple to process in one call."),
+      action: z.enum(["add", "remove", "list"]),
+      projects: z.array(z.string()).optional().describe("Project paths (e.g., '/Users/me/my-app') or dir_names. Supports batch."),
     },
     async (args): Promise<ToolResult> => {
       return handleManageProjects(db, {
