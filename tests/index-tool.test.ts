@@ -414,4 +414,82 @@ describe("handleIndex", () => {
     },
     60000
   );
+
+  it(
+    "rebuild removes sessions whose JSONL was deleted from disk",
+    async () => {
+      const projectDirName = "-Users-test-rebuildapp";
+      const projectDir = join(projectsDir, projectDirName);
+      mkdirSync(projectDir, { recursive: true });
+      saveUserConfig({ indexed_projects: [projectDirName] });
+
+      const sessionId1 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee07";
+      const sessionId2 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee08";
+      const ts1 = "2024-06-01T10:00:00.000Z";
+      const ts2 = "2024-06-01T10:00:05.000Z";
+
+      // Create two session files
+      const jsonlPath1 = join(projectDir, `${sessionId1}.jsonl`);
+      const jsonlPath2 = join(projectDir, `${sessionId2}.jsonl`);
+
+      writeFileSync(
+        jsonlPath1,
+        [
+          makeUserLine("How do I handle errors in async code?", sessionId1, ts1),
+          makeAssistantLine("Use try/catch with await or .catch() on promises.", sessionId1, ts2),
+        ].join("\n") + "\n"
+      );
+
+      writeFileSync(
+        jsonlPath2,
+        [
+          makeUserLine("What is a monad in functional programming?", sessionId2, ts1),
+          makeAssistantLine("A monad is a design pattern that wraps values with context.", sessionId2, ts2),
+        ].join("\n") + "\n"
+      );
+
+      const db = makeDb();
+
+      // 1. Index everything
+      await handleIndex(db, { mode: "incremental" });
+      await waitForIndexComplete(60000);
+
+      // 2. Verify both sessions were indexed
+      const session1Before = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionId1) as any;
+      const session2Before = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionId2) as any;
+      expect(session1Before).toBeDefined();
+      expect(session2Before).toBeDefined();
+
+      // 3. Delete the second session file from disk
+      unlinkSync(jsonlPath2);
+
+      // 4. Run rebuild (with confirm: true)
+      await handleIndex(db, { mode: "rebuild", confirm: true });
+      await waitForIndexComplete(60000);
+
+      // 5. Verify deleted session is NOT in DB
+      const session2After = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionId2);
+      expect(session2After).toBeUndefined();
+
+      const chunks2After = db
+        .prepare("SELECT COUNT(*) as count FROM chunks WHERE session_id = ?")
+        .get(session2Before.id) as { count: number };
+      expect(chunks2After.count).toBe(0);
+
+      // Session 1 (file still exists) should still be in DB
+      const session1After = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sessionId1);
+      expect(session1After).toBeDefined();
+
+      db.close();
+    },
+    60000
+  );
 });

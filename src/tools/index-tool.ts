@@ -511,6 +511,17 @@ async function runIndexInBackground(
         name: project.name,
       });
 
+      if (forceMode === "rebuild") {
+        // Delete all sessions and chunks for this project before re-indexing from disk
+        const existingSessions = db
+          .prepare("SELECT id FROM sessions WHERE project_id = ?")
+          .all(projectId) as { id: number }[];
+        for (const session of existingSessions) {
+          deleteSessionChunks(db, session.id);
+        }
+        db.prepare("DELETE FROM sessions WHERE project_id = ?").run(projectId);
+      }
+
       for (const sessionInfo of sessions) {
         // Check for cancellation between sessions
         if (cancelRequested) {
