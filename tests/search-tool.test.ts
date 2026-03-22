@@ -258,10 +258,10 @@ describe("handleSearch", () => {
 
   // ── 5. Query is required ────────────────────────────────────────────────
 
-  it("throws when query is missing", async () => {
-    await expect(
-      handleSearch(db, { query: "" })
-    ).rejects.toThrow(/query/i);
+  it("returns error when query is missing", async () => {
+    const response = await handleSearch(db, { query: "" });
+    const result = JSON.parse(response.content[0].text);
+    expect(result.error).toMatch(/query/i);
   });
 
   // ── 6. Limit is capped at searchMaxLimit ───────────────────────────────
