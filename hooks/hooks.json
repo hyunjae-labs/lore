@@ -1,0 +1,15 @@
+{
+  "description": "Auto-index conversation sessions when a Claude Code session ends",
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y getlore index --background"
+          }
+        ]
+      }
+    ]
+  }
+}

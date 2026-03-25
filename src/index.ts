@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { startServer } from "./server.js";
 import { CONFIG } from "./config.js";
 
@@ -38,6 +38,18 @@ if (args.includes("update")) {
 }
 
 if (args[0] === "index") {
+  // --background: spawn detached child and exit immediately (for hooks)
+  if (args.includes("--background")) {
+    const scriptPath = fileURLToPath(import.meta.url);
+    const forwardArgs = args.filter((a) => a !== "--background");
+    const child = spawn(process.execPath, [scriptPath, ...forwardArgs], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    process.exit(0);
+  }
+
   // Parse CLI flags
   const modeIdx = args.indexOf("--mode");
   const mode = modeIdx !== -1 && args[modeIdx + 1] ? args[modeIdx + 1] as "rebuild" | "cancel" : undefined;

@@ -15,6 +15,7 @@
     "dist/",
     ".claude-plugin/",
     "skills/",
+    "hooks/",
     "package.json"
   ],
   "scripts": {

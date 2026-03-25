@@ -11,6 +11,7 @@
   "license": "MIT",
   "keywords": ["skill", "mcp", "claude", "search", "semantic", "rag", "lore"],
   "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "lore": {
       "command": "npx",
