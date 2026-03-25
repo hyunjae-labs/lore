@@ -162,17 +162,16 @@ describe("handleSearch", () => {
     }
   });
 
-  // ── 2. Empty index returns indexing status ────────────────────────
+  // ── 2. Empty index returns ok with zero results ────────────────────
 
-  it("returns indexing status when no sessions are indexed", async () => {
-    // DB has no indexed sessions
+  it("returns ok with zero results when no sessions are indexed", async () => {
     const response = await handleSearch(db, {
       query: "something",
     });
 
     const parsed = JSON.parse(response.content[0].text);
-    expect(parsed.status).toBe("indexing");
-    expect(typeof parsed.message).toBe("string");
+    expect(parsed.status).toBe("ok");
+    expect(parsed.result_count).toBe(0);
   });
 
   // ── 3. Project filter works ─────────────────────────────────────────────

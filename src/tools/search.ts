@@ -3,7 +3,6 @@ import { CONFIG } from "../config.js";
 import { getEmbedder } from "../embedder/index.js";
 import { getIndexedSessionCount, vectorSearch } from "../db/queries.js";
 import type { SearchResult } from "../db/queries.js";
-import { handleIndex } from "./index-tool.js";
 import { toolResult, toolError } from "./helpers.js";
 
 export interface SearchParams {
@@ -17,8 +16,7 @@ export interface SearchParams {
 }
 
 interface SearchResponse {
-  status: "ok" | "indexing";
-  message?: string;
+  status: "ok";
   query?: string;
   query_time_ms?: number;
   total_indexed_sessions?: number;
@@ -83,15 +81,6 @@ export async function handleSearch(
   // 3. Check if we have any indexed data
   const indexedCount = getIndexedSessionCount(db);
 
-  if (indexedCount === 0) {
-    // No data yet — background indexing will populate on next search
-    handleIndex(db, {}).catch(() => {});
-    return toolResult({
-      status: "indexing",
-      message: "No sessions indexed yet. Indexing has started in the background. Please search again shortly.",
-    });
-  }
-
   // 4. Embed the query with the required prefix
   const embedder = await getEmbedder();
   const embedding = await embedder.embed("query: " + params.query);
@@ -121,9 +110,6 @@ export async function handleSearch(
     result_count: formatted.length,
     results: formatted,
   };
-
-  // 8. Fire-and-forget: full incremental index in background for next search
-  handleIndex(db, {}).catch(() => {});
 
   return toolResult(response);
 }
