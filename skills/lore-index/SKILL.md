@@ -22,15 +22,15 @@ Do not skip the explanation step. The user needs to understand what's happening.
 
 ## Index Options
 
-| User intent | Tool call |
-|-------------|-----------|
-| Index everything | `index(scope: "all")` — registers all projects + incremental index |
-| Index a specific project | `index(project: "/full/path/to/project")` — auto-registers + indexes |
-| Update existing index | `index()` — incremental for registered projects |
-| Start fresh | `index(mode: "rebuild")` → confirm gate → `index(mode: "rebuild", confirm: true)` |
-| Stop running index | `index(mode: "cancel")` |
+| User intent | Tool call | Existing data |
+|-------------|-----------|---------------|
+| Index everything | `index(scope: "all")` — registers all projects + incremental index | Preserved |
+| Index a specific project | `index(project: "/full/path/to/project")` — auto-registers + indexes | Preserved |
+| Update existing index | `index()` — incremental for registered projects | Preserved |
+| Start fresh | `index(mode: "rebuild")` — **deletes ALL indexed data** and re-indexes from scratch | **Deleted** |
+| Stop running index | `index(mode: "cancel")` | — |
 
-**Important:** Always use full project paths, not fuzzy names.
+**Important:** Always use full project paths, not fuzzy names. Never summarize or drop rows from tool results when presenting to the user.
 
 ## Project Management
 
@@ -55,15 +55,15 @@ Indexing runs in the background — the user can search while it's in progress.
 ## Automatic Behavior
 
 These happen without user intervention:
-- **Auto-index on search:** Every search triggers a background incremental index for registered projects.
+- **SessionEnd hook:** Every session end triggers a background incremental index for registered projects, keeping the index fresh.
 - **Orphan cleanup:** Deleted JSONL files are automatically pruned from DB during any index run.
 - **Empty session handling:** Sessions with no searchable content are marked as processed and hidden.
 
 ## Rebuild: When and Why
 
-Rebuild is rarely needed. It deletes all indexed data and re-indexes from scratch. Suggest it only when:
+Rebuild **deletes all indexed data** and re-indexes from scratch. Suggest it only when:
 - Search results seem corrupted or inconsistent
 - The user explicitly asks to start fresh
 - Major version upgrade that changes indexing format
 
-Always explain that rebuild can take several minutes for large projects, and require explicit confirmation.
+Always explain that rebuild can take several minutes for large projects.

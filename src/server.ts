@@ -69,17 +69,15 @@ export async function startServer(): Promise<void> {
     "index",
     "Index Claude Code sessions for search. No params = update added projects. Pass 'project' with a path to auto-add and index a specific project. Pass scope 'all' to add and index all projects.",
     {
-      mode: z.enum(["rebuild", "cancel"]).optional(),
+      mode: z.enum(["rebuild", "cancel"]).optional().describe("rebuild: deletes ALL indexed data and re-indexes from scratch. cancel: stop running index."),
       project: z.string().optional().describe("Project path (e.g., '/Users/me/my-app') or dir_name to auto-add and index."),
       scope: z.enum(["all"]).optional().describe("Set to 'all' to register and index all projects."),
-      confirm: z.boolean().optional().describe("Confirmation flag for rebuild. Only set true when instructed by a previous response."),
     },
     async (args): Promise<ToolResult> => {
       return handleIndex(db, {
         mode: args.mode,
         project: args.project,
         scope: args.scope,
-        confirm: args.confirm,
       });
     }
   );

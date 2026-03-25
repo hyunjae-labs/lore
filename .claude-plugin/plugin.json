@@ -1,6 +1,6 @@
 {
   "name": "lore",
-  "version": "0.2.32",
+  "version": "0.2.33",
   "description": "Semantic search skill + MCP server for Claude Code conversation history",
   "author": {
     "name": "hyunjae-labs",

@@ -179,22 +179,12 @@ export interface IndexParams {
   mode?: "rebuild" | "cancel";
   project?: string;
   scope?: "all";
-  confirm?: boolean;
 }
 
 export async function handleIndex(
   db: Database.Database,
   params: IndexParams
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
-
-  // Rebuild requires explicit confirmation (safety gate)
-  // confirm is intentionally excluded from the tool schema so LLMs cannot bypass the gate on first call
-  if (params.mode === "rebuild" && !params.confirm) {
-    return toolResult({
-      status: "confirmation_required",
-      message: "⚠️ Rebuild will delete ALL indexed data and re-index from scratch. This can take several minutes. To proceed, call index again with mode 'rebuild' and confirm set to true.",
-    });
-  }
 
   // Cancel running indexing
   if (params.mode === "cancel") {

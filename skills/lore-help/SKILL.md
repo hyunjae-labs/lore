@@ -36,8 +36,6 @@ Finds past conversations using hybrid keyword + semantic matching.
 
 **Returns:** Ranked chunks with score, content, session metadata, and `has_more_before`/`has_more_after` flags.
 
-**Auto-indexing:** Every search triggers a background incremental index for registered projects, keeping results fresh.
-
 ## Get Context (`get_context`)
 
 Expands a search result to show surrounding conversation turns.
@@ -52,12 +50,11 @@ Expands a search result to show surrounding conversation turns.
 
 Indexes Claude Code session files into the searchable database.
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `scope` | "all" | Register and index ALL projects on disk |
-| `project` | string | Auto-register and index a specific project (pass full path) |
-| `mode` | "rebuild" / "cancel" | Rebuild: clean slate re-index. Cancel: stop running index |
-| `confirm` | boolean | Safety gate for rebuild — must be explicitly set to true |
+| Param | Type | Description | Existing data |
+|-------|------|-------------|---------------|
+| `scope` | "all" | Register all unregistered projects + incremental index. **Preserves existing data — this is NOT a rebuild.** | Preserved |
+| `project` | string | Auto-register and index a specific project (pass full path) | Preserved |
+| `mode` | "rebuild" / "cancel" | Rebuild: **deletes all indexed data** and re-indexes from scratch. Cancel: stop running index | **Deleted** (rebuild) |
 
 **Default (no params):** Incremental index for registered projects only.
 
@@ -65,6 +62,7 @@ Indexes Claude Code session files into the searchable database.
 - Orphan cleanup: sessions whose JSONL files were deleted are pruned from DB
 - Empty sessions: sessions with no searchable content are marked processed and hidden
 - Background execution: index runs in background, search works while indexing
+- SessionEnd hook: automatically triggers incremental indexing when a Claude Code session ends
 
 ## List Sessions (`list_sessions`)
 
@@ -100,7 +98,7 @@ Shows indexing health: running/idle state, progress, session counts, DB size, an
 3. `status` — monitor progress
 
 **Daily use:**
-- Just `search` — auto-indexes in background
+- Just `search` — SessionEnd hook keeps the index fresh automatically
 - `get_context` to expand interesting results
 
 **Add a new project:**
@@ -108,7 +106,7 @@ Shows indexing health: running/idle state, progress, session counts, DB size, an
 
 **Clean up:**
 - `manage_projects(action: "remove", projects: ["/path"])` — unregister + delete data
-- `index(mode: "rebuild", confirm: true)` — fresh start
+- `index(mode: "rebuild")` — fresh start (**deletes all data**)
 
 ## Related Skills
 
