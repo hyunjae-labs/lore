@@ -19,11 +19,11 @@ export const CONFIG = {
 // ── User config (persisted in ~/.lore/config.json) ───────────────────────
 
 export interface UserConfig {
-  indexed_projects: string[];
+  excluded_projects: string[];
 }
 
 const DEFAULT_USER_CONFIG: UserConfig = {
-  indexed_projects: [],
+  excluded_projects: [],
 };
 
 function getConfigPath(): string {
@@ -34,8 +34,9 @@ export function loadUserConfig(): UserConfig {
   try {
     const raw = readFileSync(getConfigPath(), "utf-8");
     const parsed = JSON.parse(raw);
+    // Migration: if old config has indexed_projects but no excluded_projects, return default
     return {
-      indexed_projects: Array.isArray(parsed.indexed_projects) ? parsed.indexed_projects : [],
+      excluded_projects: Array.isArray(parsed.excluded_projects) ? parsed.excluded_projects : [],
     };
   } catch {
     return { ...DEFAULT_USER_CONFIG };

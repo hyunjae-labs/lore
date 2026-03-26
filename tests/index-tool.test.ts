@@ -80,7 +80,7 @@ beforeEach(() => {
   process.env.LORE_DIR = loreDir;
 
   // Ensure a clean config for each test
-  saveUserConfig({ indexed_projects: [] });
+  saveUserConfig({ excluded_projects: [] });
 });
 
 afterEach(() => {
@@ -99,7 +99,6 @@ describe("handleIndex", () => {
       const projectDirName = "-Users-test-myapp";
       const projectDir = join(projectsDir, projectDirName);
       mkdirSync(projectDir, { recursive: true });
-      saveUserConfig({ indexed_projects: [projectDirName] });
 
       const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee01";
       const ts1 = "2024-01-10T10:00:00.000Z";
@@ -165,7 +164,6 @@ describe("handleIndex", () => {
       const projectDirName = "-Users-test-myapp2";
       const projectDir = join(projectsDir, projectDirName);
       mkdirSync(projectDir, { recursive: true });
-      saveUserConfig({ indexed_projects: [projectDirName] });
 
       const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee02";
       const ts1 = "2024-02-01T09:00:00.000Z";
@@ -215,7 +213,6 @@ describe("handleIndex", () => {
       const projectDirName = "-Users-test-myapp3";
       const projectDir = join(projectsDir, projectDirName);
       mkdirSync(projectDir, { recursive: true });
-      saveUserConfig({ indexed_projects: [projectDirName] });
 
       const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee03";
       const ts1 = "2024-03-01T08:00:00.000Z";
@@ -262,29 +259,115 @@ describe("handleIndex", () => {
   );
 
   it(
-    "returns no_projects_registered when config is empty",
+    "indexes all projects by default (opt-out model)",
     async () => {
-      // No projects registered in config
+      // Create two projects on disk, no exclusions
+      const projectDirNameA = "-Users-test-optout-a";
+      const projectDirNameB = "-Users-test-optout-b";
+      mkdirSync(join(projectsDir, projectDirNameA), { recursive: true });
+      mkdirSync(join(projectsDir, projectDirNameB), { recursive: true });
+
+      const sidA = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0a1";
+      const sidB = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0b1";
+      const ts = "2024-07-01T10:00:00.000Z";
+
+      writeFileSync(
+        join(projectsDir, projectDirNameA, `${sidA}.jsonl`),
+        [
+          makeUserLine("Opt-out test A", sidA, ts),
+          makeAssistantLine("Answer A", sidA, ts),
+        ].join("\n") + "\n"
+      );
+
+      writeFileSync(
+        join(projectsDir, projectDirNameB, `${sidB}.jsonl`),
+        [
+          makeUserLine("Opt-out test B", sidB, ts),
+          makeAssistantLine("Answer B", sidB, ts),
+        ].join("\n") + "\n"
+      );
+
       const db = makeDb();
 
       const response = await handleIndex(db, {});
       const result = JSON.parse(response.content[0].text);
+      expect(result.status).toBe("started");
 
-      expect(result.status).toBe("no_projects_added");
+      await waitForIndexComplete(30000);
+
+      // Both sessions should be indexed (all projects indexed by default)
+      const sessionA = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sidA);
+      const sessionB = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sidB);
+      expect(sessionA).toBeDefined();
+      expect(sessionB).toBeDefined();
 
       db.close();
     },
-    30000
+    60000
+  );
+
+  it(
+    "excludes projects in excluded_projects from indexing",
+    async () => {
+      const projectDirNameA = "-Users-test-excl-a";
+      const projectDirNameB = "-Users-test-excl-b";
+      mkdirSync(join(projectsDir, projectDirNameA), { recursive: true });
+      mkdirSync(join(projectsDir, projectDirNameB), { recursive: true });
+
+      const sidA = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0c1";
+      const sidB = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0d1";
+      const ts = "2024-08-01T10:00:00.000Z";
+
+      writeFileSync(
+        join(projectsDir, projectDirNameA, `${sidA}.jsonl`),
+        [
+          makeUserLine("Excluded test A", sidA, ts),
+          makeAssistantLine("Answer A", sidA, ts),
+        ].join("\n") + "\n"
+      );
+
+      writeFileSync(
+        join(projectsDir, projectDirNameB, `${sidB}.jsonl`),
+        [
+          makeUserLine("Excluded test B", sidB, ts),
+          makeAssistantLine("Answer B", sidB, ts),
+        ].join("\n") + "\n"
+      );
+
+      // Exclude project B
+      saveUserConfig({ excluded_projects: [projectDirNameB] });
+
+      const db = makeDb();
+
+      await handleIndex(db, {});
+      await waitForIndexComplete(30000);
+
+      // Only project A should be indexed
+      const sessionA = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sidA);
+      const sessionB = db
+        .prepare("SELECT * FROM sessions WHERE session_id = ?")
+        .get(sidB);
+      expect(sessionA).toBeDefined();
+      expect(sessionB).toBeUndefined();
+
+      db.close();
+    },
+    60000
   );
 
   it(
     "releases lock file after completion",
     async () => {
-      // Need a registered project with a session for lock to be acquired
+      // Need a project with a session for lock to be acquired
       const projectDirName = "-Users-test-locktest";
       const projectDir = join(projectsDir, projectDirName);
       mkdirSync(projectDir, { recursive: true });
-      saveUserConfig({ indexed_projects: [projectDirName] });
       writeFileSync(
         join(projectDir, "lock-test-session.jsonl"),
         JSON.stringify({ type: "user", sessionId: "lock-test", timestamp: "2024-01-01T00:00:00Z", message: { role: "user", content: "test" } }) + "\n"
@@ -336,7 +419,7 @@ describe("handleIndex", () => {
 
       const db = makeDb();
 
-      // Index only "alpha" project by dirName — auto-adds it
+      // Index only "alpha" project by dirName
       await handleIndex(db, {
         project: projectDirNameA,
       });
@@ -359,100 +442,34 @@ describe("handleIndex", () => {
   );
 
   it(
-    "scope 'all' registers all projects and indexes them",
+    "project param indexes even if project is excluded",
     async () => {
-      // Create two projects on disk
-      const projectDirNameA = "-Users-test-scopeall-a";
-      const projectDirNameB = "-Users-test-scopeall-b";
-      mkdirSync(join(projectsDir, projectDirNameA), { recursive: true });
-      mkdirSync(join(projectsDir, projectDirNameB), { recursive: true });
-
-      const sidA = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0a1";
-      const sidB = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0b1";
-      const ts = "2024-07-01T10:00:00.000Z";
-
-      writeFileSync(
-        join(projectsDir, projectDirNameA, `${sidA}.jsonl`),
-        [
-          makeUserLine("Scope all test A", sidA, ts),
-          makeAssistantLine("Answer A", sidA, ts),
-        ].join("\n") + "\n"
-      );
-
-      writeFileSync(
-        join(projectsDir, projectDirNameB, `${sidB}.jsonl`),
-        [
-          makeUserLine("Scope all test B", sidB, ts),
-          makeAssistantLine("Answer B", sidB, ts),
-        ].join("\n") + "\n"
-      );
-
-      // No projects registered initially
-      const configBefore = loadUserConfig();
-      expect(configBefore.indexed_projects.length).toBe(0);
-
-      const db = makeDb();
-
-      const response = await handleIndex(db, { scope: "all" });
-      const result = JSON.parse(response.content[0].text);
-      expect(result.status).toBe("started");
-
-      await waitForIndexComplete(30000);
-
-      // All projects should now be registered in config
-      const configAfter = loadUserConfig();
-      expect(configAfter.indexed_projects.length).toBeGreaterThan(0);
-      expect(configAfter.indexed_projects).toContain(projectDirNameA);
-      expect(configAfter.indexed_projects).toContain(projectDirNameB);
-
-      // Both sessions should be indexed
-      const sessionA = db
-        .prepare("SELECT * FROM sessions WHERE session_id = ?")
-        .get(sidA);
-      const sessionB = db
-        .prepare("SELECT * FROM sessions WHERE session_id = ?")
-        .get(sidB);
-      expect(sessionA).toBeDefined();
-      expect(sessionB).toBeDefined();
-
-      db.close();
-    },
-    60000
-  );
-
-  it(
-    "project param auto-adds and indexes specific project",
-    async () => {
-      const projectDirName = "-Users-test-autoadd";
+      const projectDirName = "-Users-test-excluded-explicit";
       const projectDir = join(projectsDir, projectDirName);
       mkdirSync(projectDir, { recursive: true });
 
-      const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0c1";
+      const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee0e1";
       const ts = "2024-08-01T10:00:00.000Z";
 
       writeFileSync(
         join(projectDir, `${sessionId}.jsonl`),
         [
-          makeUserLine("Auto-add test question", sessionId, ts),
-          makeAssistantLine("Auto-add test answer", sessionId, ts),
+          makeUserLine("Explicit project test", sessionId, ts),
+          makeAssistantLine("Explicit project answer", sessionId, ts),
         ].join("\n") + "\n"
       );
 
-      // No projects registered initially
-      const configBefore = loadUserConfig();
-      expect(configBefore.indexed_projects.length).toBe(0);
+      // Exclude the project
+      saveUserConfig({ excluded_projects: [projectDirName] });
 
       const db = makeDb();
 
-      // Pass the dirName directly as project param — should auto-add
+      // Pass the dirName directly — should index even though excluded
       const response = await handleIndex(db, { project: projectDirName });
       const result = JSON.parse(response.content[0].text);
       expect(result.status).toBe("started");
 
       await waitForIndexComplete(30000);
-
-      const configAfter = loadUserConfig();
-      expect(configAfter.indexed_projects).toContain(projectDirName);
 
       // Session should be indexed
       const session = db
@@ -471,7 +488,6 @@ describe("handleIndex", () => {
       const projectDirName = "-Users-test-pruneapp";
       const projectDir = join(projectsDir, projectDirName);
       mkdirSync(projectDir, { recursive: true });
-      saveUserConfig({ indexed_projects: [projectDirName] });
 
       const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee06";
       const ts1 = "2024-05-01T10:00:00.000Z";
@@ -535,7 +551,6 @@ describe("handleIndex", () => {
       const projectDirName = "-Users-test-rebuildapp";
       const projectDir = join(projectsDir, projectDirName);
       mkdirSync(projectDir, { recursive: true });
-      saveUserConfig({ indexed_projects: [projectDirName] });
 
       const sessionId1 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee07";
       const sessionId2 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee08";

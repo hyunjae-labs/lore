@@ -55,14 +55,12 @@ if (args[0] === "index") {
   const mode = modeIdx !== -1 && args[modeIdx + 1] ? args[modeIdx + 1] as "rebuild" | "cancel" : undefined;
   const projectIdx = args.indexOf("--project");
   const project = projectIdx !== -1 && args[projectIdx + 1] ? args[projectIdx + 1] : undefined;
-  const scopeIdx = args.indexOf("--scope");
-  const scope = scopeIdx !== -1 && args[scopeIdx + 1] === "all" ? "all" as const : undefined;
 
   const { getDb, closeDb } = await import("./db/index.js");
   const { handleIndex, waitForIndexComplete, getIndexProgress } = await import("./tools/index-tool.js");
 
   const db = getDb(CONFIG.dbPath);
-  const result = await handleIndex(db, { mode, project, scope });
+  const result = await handleIndex(db, { mode, project });
 
   const resultData = JSON.parse(result.content[0].text);
   console.error(`lore: ${resultData.message || resultData.status}`);

@@ -184,8 +184,8 @@ beforeAll(() => {
   mkdirSync(projectPath, { recursive: true });
   writeFileSync(join(projectPath, `${SESSION_ID}.jsonl`), realisticJsonl(SESSION_ID));
 
-  // Register project for indexing
-  saveUserConfig({ indexed_projects: [PROJECT_DIR_NAME] });
+  // No exclusions — project is indexed by default (opt-out model)
+  saveUserConfig({ excluded_projects: [] });
 
   db = makeDb();
 });

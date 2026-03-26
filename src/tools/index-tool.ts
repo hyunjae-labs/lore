@@ -178,7 +178,6 @@ let cancelRequested = false;
 export interface IndexParams {
   mode?: "rebuild" | "cancel";
   project?: string;
-  scope?: "all";
 }
 
 export async function handleIndex(
@@ -214,29 +213,17 @@ export async function handleIndex(
     });
   }
 
-  // Determine which projects to index:
-  // 1. scope "all" → register all projects and index them
-  // 2. params.project → auto-register that project and index it
-  // 3. config.indexed_projects non-empty → only registered projects
-  // 4. nothing → show guidance
+  // Determine which projects to index (opt-out model):
+  // - All projects are indexed by default unless excluded
+  // - params.project → index that specific project (even if excluded)
+  // - No params → index all non-excluded projects
   const allProjects = scanProjects(projectsBaseDir);
   const userConfig = loadUserConfig();
+  const excludedSet = new Set(userConfig.excluded_projects);
 
   let projectsToIndex: typeof allProjects;
 
-  if (params.scope === "all") {
-    projectsToIndex = allProjects;
-    const newlyAdded: string[] = [];
-    for (const p of allProjects) {
-      if (!userConfig.indexed_projects.includes(p.dirName)) {
-        userConfig.indexed_projects.push(p.dirName);
-        newlyAdded.push(p.dirName);
-      }
-    }
-    if (newlyAdded.length > 0) {
-      saveUserConfig(userConfig);
-    }
-  } else if (params.project) {
+  if (params.project) {
     const dirName = pathToDirName(params.project);
     const found = allProjects.find((p) => p.dirName === dirName || p.dirName === params.project);
     if (!found) {
@@ -246,28 +233,17 @@ export async function handleIndex(
         message: `Project not found: ${params.project}`,
       });
     }
-    if (!userConfig.indexed_projects.includes(found.dirName)) {
-      userConfig.indexed_projects.push(found.dirName);
-      saveUserConfig(userConfig);
-    }
+    // User explicitly asked for this project — index it even if excluded
     projectsToIndex = [found];
-  } else if (userConfig.indexed_projects.length > 0) {
-    const registered = new Set(userConfig.indexed_projects);
-    projectsToIndex = allProjects.filter((p) => registered.has(p.dirName));
   } else {
-    releaseLock(loreDir);
-    return toolResult({
-      status: "no_projects_added",
-      total_projects_on_disk: allProjects.length,
-      message: "No projects are added for indexing. Use manage_projects 'add' or pass scope 'all' to index everything.",
-    });
+    projectsToIndex = allProjects.filter((p) => !excludedSet.has(p.dirName));
   }
 
-  // Prune config entries for projects whose directories no longer exist
+  // Prune excluded_projects entries for projects whose directories no longer exist
   const allDirNames = new Set(allProjects.map((p) => p.dirName));
-  const staleProjects = userConfig.indexed_projects.filter((d) => !allDirNames.has(d));
-  if (staleProjects.length > 0) {
-    for (const dirName of staleProjects) {
+  const staleExclusions = userConfig.excluded_projects.filter((d) => !allDirNames.has(d));
+  if (staleExclusions.length > 0) {
+    for (const dirName of staleExclusions) {
       const projectRow = db.prepare("SELECT id FROM projects WHERE dir_name = ?").get(dirName) as { id: number } | undefined;
       if (projectRow) {
         const sessions = db.prepare("SELECT id FROM sessions WHERE project_id = ?").all(projectRow.id) as { id: number }[];
@@ -278,7 +254,7 @@ export async function handleIndex(
         db.prepare("DELETE FROM projects WHERE id = ?").run(projectRow.id);
       }
     }
-    userConfig.indexed_projects = userConfig.indexed_projects.filter((d) => allDirNames.has(d));
+    userConfig.excluded_projects = userConfig.excluded_projects.filter((d) => allDirNames.has(d));
     saveUserConfig(userConfig);
   }
 

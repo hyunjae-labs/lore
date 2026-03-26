@@ -53,9 +53,9 @@ export async function handleListSessions(
       .get() as any
   ).count;
 
-  // Project summary with registered status
+  // Project summary with excluded status
   const userConfig = loadUserConfig();
-  const registeredSet = new Set(userConfig.indexed_projects);
+  const excludedSet = new Set(userConfig.excluded_projects);
 
   const projects = db
     .prepare(
@@ -78,7 +78,7 @@ export async function handleListSessions(
       name: p.name,
       path: p.path,
       session_count: p.session_count,
-      registered: registeredSet.has(p.dir_name),
+      excluded: excludedSet.has(p.dir_name),
     })),
   };
 

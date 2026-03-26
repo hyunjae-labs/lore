@@ -67,17 +67,15 @@ export async function startServer(): Promise<void> {
 
   server.tool(
     "index",
-    "Index Claude Code sessions for search. No params = update added projects. Pass 'project' with a path to auto-add and index a specific project. Pass scope 'all' to add and index all projects.",
+    "Index Claude Code sessions for search. No params = index all non-excluded projects. Pass 'project' with a path to index a specific project (even if excluded).",
     {
       mode: z.enum(["rebuild", "cancel"]).optional().describe("rebuild: deletes ALL indexed data and re-indexes from scratch. cancel: stop running index."),
-      project: z.string().optional().describe("Project path (e.g., '/Users/me/my-app') or dir_name to auto-add and index."),
-      scope: z.enum(["all"]).optional().describe("Set to 'all' to register and index all projects."),
+      project: z.string().optional().describe("Project path (e.g., '/Users/me/my-app') or dir_name to index a specific project."),
     },
     async (args): Promise<ToolResult> => {
       return handleIndex(db, {
         mode: args.mode,
         project: args.project,
-        scope: args.scope,
       });
     }
   );
@@ -103,9 +101,9 @@ export async function startServer(): Promise<void> {
   // manage_projects tool
   server.tool(
     "manage_projects",
-    "Manage which projects are registered for indexing. Use 'list' to see all projects and their added status. Use 'add' with project paths to register. Use 'remove' to unregister and clean up indexed data.",
+    "Manage which projects are indexed. All projects are indexed by default (opt-out model). Use 'list' to see all projects and their status. Use 'exclude' to stop indexing a project and clean up its data. Use 'include' to undo an exclusion.",
     {
-      action: z.enum(["add", "remove", "list"]),
+      action: z.enum(["exclude", "include", "list"]),
       projects: z.array(z.string()).optional().describe("Project paths (e.g., '/Users/me/my-app') or dir_names. Supports batch."),
     },
     async (args): Promise<ToolResult> => {

@@ -3,9 +3,11 @@ name: lore-help
 description: Comprehensive guide to all lore tools and capabilities. Invoke this skill when the user asks what lore is, how to use it, what tools are available, or needs general guidance. Trigger on "what is lore", "how does lore work", "lore help", "lore guide", "what can lore do", "show me lore tools", or any question about lore's capabilities and usage. NOT for actually searching (use lore-search) or indexing (use lore-index).
 ---
 
-# Lore — Complete Reference
+# Lore -- Complete Reference
 
 Lore is a semantic search system for Claude Code conversation history. It indexes past sessions into a searchable database and provides tools to find, browse, and expand conversation context.
+
+Lore uses an **opt-out (blacklist) model**: ALL projects are indexed by default. Users can exclude specific projects they don't want indexed.
 
 ## Tools Overview
 
@@ -15,7 +17,7 @@ Lore is a semantic search system for Claude Code conversation history. It indexe
 | `get_context` | Expand a search result to see surrounding conversation | When a result is truncated and you need more context |
 | `index` | Index sessions into the searchable database | Setting up, updating, or rebuilding the index |
 | `list_sessions` | Browse indexed sessions with metadata | Viewing session history by project, date, or recency |
-| `manage_projects` | Register/unregister projects for indexing | Controlling which projects are indexed |
+| `manage_projects` | Exclude/include projects from indexing | Controlling which projects are indexed |
 | `status` | Check indexing health and progress | Monitoring a running index or checking DB state |
 
 ## Search (`search`)
@@ -26,7 +28,7 @@ Finds past conversations using hybrid keyword + semantic matching.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `query` | string (required) | Search query — combine keyword anchors with semantic phrases |
+| `query` | string (required) | Search query -- combine keyword anchors with semantic phrases |
 | `project` | string | Filter by project path (e.g., `/Users/.../my-project`) |
 | `session` | string | Filter by session UUID |
 | `branch` | string | Filter by git branch |
@@ -48,18 +50,17 @@ Expands a search result to show surrounding conversation turns.
 
 ## Index (`index`)
 
-Indexes Claude Code session files into the searchable database.
+Indexes Claude Code session files into the searchable database. All non-excluded projects are indexed by default.
 
 | Param | Type | Description | Existing data |
 |-------|------|-------------|---------------|
-| `scope` | "all" | Register all unregistered projects + incremental index. **Preserves existing data — this is NOT a rebuild.** | Preserved |
-| `project` | string | Auto-register and index a specific project (pass full path) | Preserved |
+| *(none)* | -- | Incremental index for all non-excluded projects | Preserved |
+| `project` | string | Index a specific project (pass full path). Indexes even if excluded. | Preserved |
 | `mode` | "rebuild" / "cancel" | Rebuild: **deletes all indexed data** and re-indexes from scratch. Cancel: stop running index | **Deleted** (rebuild) |
-
-**Default (no params):** Incremental index for registered projects only.
 
 **Automatic behaviors:**
 - Orphan cleanup: sessions whose JSONL files were deleted are pruned from DB
+- Stale exclusion cleanup: excluded entries for vanished directories are cleaned up
 - Empty sessions: sessions with no searchable content are marked processed and hidden
 - Background execution: index runs in background, search works while indexing
 - SessionEnd hook: automatically triggers incremental indexing when a Claude Code session ends
@@ -76,13 +77,13 @@ Browse indexed sessions with metadata.
 
 ## Manage Projects (`manage_projects`)
 
-Control which projects are registered for indexing.
+Control which projects are indexed using an opt-out model. All projects are indexed by default.
 
 | Action | Description |
 |--------|-------------|
-| `list` | Show all projects on disk with `added: true/false` status |
-| `add` | Register project(s) for indexing — pass full project paths |
-| `remove` | Unregister + delete all indexed data for project(s) |
+| `list` | Show all projects on disk with `status: "indexed"/"excluded"` |
+| `exclude` | Stop indexing a project + delete all its indexed data from DB |
+| `include` | Undo an exclusion -- next index run will pick it up |
 
 **Path-based matching:** Always pass the actual project path (e.g., `/Users/hyunjaelim/01_projects/lore`). Fuzzy names are not supported.
 
@@ -93,22 +94,24 @@ Shows indexing health: running/idle state, progress, session counts, DB size, an
 ## Common Workflows
 
 **First time setup:**
-1. `manage_projects(action: "list")` — see available projects
-2. `index(scope: "all")` — register and index everything
-3. `status` — monitor progress
+1. `manage_projects(action: "list")` -- see available projects (all indexed by default)
+2. `index()` -- index everything
+3. `status` -- monitor progress
 
 **Daily use:**
-- Just `search` — SessionEnd hook keeps the index fresh automatically
+- Just `search` -- SessionEnd hook keeps the index fresh automatically
 - `get_context` to expand interesting results
 
-**Add a new project:**
-- `index(project: "/path/to/new-project")` — auto-registers and indexes
+**Exclude a noisy project:**
+- `manage_projects(action: "exclude", projects: ["/path/to/noisy-project"])` -- stops indexing + cleans data
+
+**Undo an exclusion:**
+- `manage_projects(action: "include", projects: ["/path"])` -- next index run picks it up
 
 **Clean up:**
-- `manage_projects(action: "remove", projects: ["/path"])` — unregister + delete data
-- `index(mode: "rebuild")` — fresh start (**deletes all data**)
+- `index(mode: "rebuild")` -- fresh start (**deletes all data**)
 
 ## Related Skills
 
-- **lore-search** — Detailed guide for formulating effective search queries
-- **lore-index** — Step-by-step guide for indexing and project management with user interaction
+- **lore-search** -- Detailed guide for formulating effective search queries
+- **lore-index** -- Step-by-step guide for indexing and project management with user interaction

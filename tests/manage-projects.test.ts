@@ -50,7 +50,7 @@ beforeEach(() => {
   process.env.LORE_DIR = loreDir;
 
   // Reset config each test
-  saveUserConfig({ indexed_projects: [] });
+  saveUserConfig({ excluded_projects: [] });
 });
 
 afterEach(() => {
@@ -68,27 +68,40 @@ describe("manage_projects", () => {
     // 3 with sessions shown, 1 empty hidden
     expect(result.total_projects).toBe(3);
     expect(result.hidden_empty).toBe("1 projects with 0 sessions hidden");
-    expect(result.added_count).toBe(0);
+    expect(result.excluded_count).toBe(0);
     db.close();
   });
 
-  it("add registers a project by dirName", async () => {
+  it("list shows all projects as indexed by default (opt-out model)", async () => {
     const db = makeDb();
-    const response = await handleManageProjects(db, { action: "add", projects: ["-Users-test-alpha"] });
+    const response = await handleManageProjects(db, { action: "list" });
+    const result = JSON.parse(response.content[0].text);
+
+    // All visible projects should have status "indexed"
+    for (const p of result.projects) {
+      expect(p.status).toBe("indexed");
+      expect(p.excluded).toBe(false);
+    }
+    db.close();
+  });
+
+  it("exclude adds a project to excluded_projects and cleans DB data", async () => {
+    const db = makeDb();
+    const response = await handleManageProjects(db, { action: "exclude", projects: ["-Users-test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
-    expect(result.added).toContain("-Users-test-alpha");
+    expect(result.excluded).toContain("-Users-test-alpha");
 
     const config = loadUserConfig();
-    expect(config.indexed_projects).toContain("-Users-test-alpha");
+    expect(config.excluded_projects).toContain("-Users-test-alpha");
     db.close();
   });
 
-  it("add returns not_found when path doesn't match any project", async () => {
+  it("exclude returns not_found when path doesn't match any project", async () => {
     const db = makeDb();
     const response = await handleManageProjects(db, {
-      action: "add",
+      action: "exclude",
       projects: ["/nonexistent/path"],
     });
     const result = JSON.parse(response.content[0].text);
@@ -96,74 +109,54 @@ describe("manage_projects", () => {
     db.close();
   });
 
-  it("add returns not_found when no project matches", async () => {
+  it("exclude skips already-excluded projects", async () => {
     const db = makeDb();
-    const response = await handleManageProjects(db, { action: "add", projects: ["nonexistent"] });
+    saveUserConfig({ excluded_projects: ["-Users-test-alpha"] });
+
+    const response = await handleManageProjects(db, { action: "exclude", projects: ["-Users-test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
-    expect(result.not_found).toContain("nonexistent");
+    expect(result.skipped).toContain("-Users-test-alpha");
+    expect(result.excluded.length).toBe(0);
     db.close();
   });
 
-  it("list shows added status after add", async () => {
+  it("list shows excluded status after exclude", async () => {
     const db = makeDb();
-    await handleManageProjects(db, { action: "add", projects: ["-Users-test-alpha"] });
+    await handleManageProjects(db, { action: "exclude", projects: ["-Users-test-alpha"] });
 
     const response = await handleManageProjects(db, { action: "list" });
     const result = JSON.parse(response.content[0].text);
 
-    expect(result.added_count).toBe(1);
+    expect(result.excluded_count).toBe(1);
     const alpha = result.projects.find((p: any) => p.dir_name === "-Users-test-alpha");
-    expect(alpha.added).toBe(true);
+    expect(alpha.excluded).toBe(true);
+    expect(alpha.status).toBe("excluded");
     db.close();
   });
 
-  it("remove unregisters a project and deletes DB data", async () => {
+  it("include removes a project from excluded_projects", async () => {
     const db = makeDb();
-    saveUserConfig({ indexed_projects: ["-Users-test-alpha", "-Users-test-beta"] });
+    saveUserConfig({ excluded_projects: ["-Users-test-alpha", "-Users-test-beta"] });
 
-    const response = await handleManageProjects(db, { action: "remove", projects: ["-Users-test-alpha"] });
+    const response = await handleManageProjects(db, { action: "include", projects: ["-Users-test-alpha"] });
     const result = JSON.parse(response.content[0].text);
 
     expect(result.status).toBe("ok");
-    expect(result.removed).toContain("-Users-test-alpha");
+    expect(result.included).toContain("-Users-test-alpha");
 
     const config = loadUserConfig();
-    expect(config.indexed_projects).not.toContain("-Users-test-alpha");
-    expect(config.indexed_projects).toContain("-Users-test-beta");
+    expect(config.excluded_projects).not.toContain("-Users-test-alpha");
+    expect(config.excluded_projects).toContain("-Users-test-beta");
     db.close();
   });
 
-  it("remove uses exact match and does not remove prefix-matching projects", async () => {
+  it("include returns not_found when path doesn't match excluded project", async () => {
     const db = makeDb();
-    // alpha is a prefix of alpha-extra (simulated via dir names)
-    mkdirSync(join(projectsDir, "-Users-test-alpha-extra"), { recursive: true });
-    writeFileSync(join(projectsDir, "-Users-test-alpha-extra", "s4.jsonl"), DUMMY_LINE);
-
-    saveUserConfig({
-      indexed_projects: ["-Users-test-alpha", "-Users-test-alpha-extra", "-Users-test-beta"],
-    });
-
-    // Exact match on dir_name — should only remove alpha
-    const response = await handleManageProjects(db, { action: "remove", projects: ["-Users-test-alpha"] });
-    const result = JSON.parse(response.content[0].text);
-
-    expect(result.status).toBe("ok");
-    expect(result.removed.length).toBe(1);
-
-    const config = loadUserConfig();
-    expect(config.indexed_projects).not.toContain("-Users-test-alpha");
-    expect(config.indexed_projects).toContain("-Users-test-alpha-extra");
-    expect(config.indexed_projects).toContain("-Users-test-beta");
-    db.close();
-  });
-
-  it("remove returns not_found when path doesn't match registered project", async () => {
-    const db = makeDb();
-    saveUserConfig({ indexed_projects: ["-Users-test-alpha"] });
+    saveUserConfig({ excluded_projects: ["-Users-test-alpha"] });
     const response = await handleManageProjects(db, {
-      action: "remove",
+      action: "include",
       projects: ["/nonexistent/path"],
     });
     const result = JSON.parse(response.content[0].text);
@@ -171,45 +164,74 @@ describe("manage_projects", () => {
     db.close();
   });
 
-  it("add requires projects param", async () => {
+  it("exclude requires projects param", async () => {
     const db = makeDb();
-    const response = await handleManageProjects(db, { action: "add" });
+    const response = await handleManageProjects(db, { action: "exclude" });
     const result = JSON.parse(response.content[0].text);
     expect(result.error).toBeDefined();
     db.close();
   });
 
-  it("projects are sorted: added first, then by session count", async () => {
+  it("include requires projects param", async () => {
     const db = makeDb();
-    saveUserConfig({ indexed_projects: ["-Users-test-beta"] });
+    const response = await handleManageProjects(db, { action: "include" });
+    const result = JSON.parse(response.content[0].text);
+    expect(result.error).toBeDefined();
+    db.close();
+  });
+
+  it("projects are sorted: indexed first, excluded last, then by session count", async () => {
+    const db = makeDb();
+    saveUserConfig({ excluded_projects: ["-Users-test-beta"] });
 
     const response = await handleManageProjects(db, { action: "list" });
     const result = JSON.parse(response.content[0].text);
 
-    expect(result.projects[0].dir_name).toBe("-Users-test-beta");
-    expect(result.projects[0].added).toBe(true);
+    // Excluded project should be last
+    const lastProject = result.projects[result.projects.length - 1];
+    expect(lastProject.dir_name).toBe("-Users-test-beta");
+    expect(lastProject.excluded).toBe(true);
     db.close();
   });
 
-  it("add accepts full path and converts to dirName", async () => {
+  it("exclude accepts full path and converts to dirName", async () => {
     const db = makeDb();
     const response = await handleManageProjects(db, {
-      action: "add",
+      action: "exclude",
       projects: ["/Users/test/alpha"],
     });
     const result = JSON.parse(response.content[0].text);
-    expect(result.added).toContain("-Users-test-alpha");
+    expect(result.excluded).toContain("-Users-test-alpha");
     db.close();
   });
 
-  it("add accepts dirName directly", async () => {
+  it("exclude accepts dirName directly", async () => {
     const db = makeDb();
     const response = await handleManageProjects(db, {
-      action: "add",
+      action: "exclude",
       projects: ["-Users-test-alpha"],
     });
     const result = JSON.parse(response.content[0].text);
-    expect(result.added).toContain("-Users-test-alpha");
+    expect(result.excluded).toContain("-Users-test-alpha");
+    db.close();
+  });
+
+  it("exclude uses exact match and does not exclude prefix-matching projects", async () => {
+    const db = makeDb();
+    // alpha is a prefix of alpha-extra (simulated via dir names)
+    mkdirSync(join(projectsDir, "-Users-test-alpha-extra"), { recursive: true });
+    writeFileSync(join(projectsDir, "-Users-test-alpha-extra", "s4.jsonl"), DUMMY_LINE);
+
+    // Exact match on dir_name — should only exclude alpha
+    const response = await handleManageProjects(db, { action: "exclude", projects: ["-Users-test-alpha"] });
+    const result = JSON.parse(response.content[0].text);
+
+    expect(result.status).toBe("ok");
+    expect(result.excluded.length).toBe(1);
+
+    const config = loadUserConfig();
+    expect(config.excluded_projects).toContain("-Users-test-alpha");
+    expect(config.excluded_projects).not.toContain("-Users-test-alpha-extra");
     db.close();
   });
 });
