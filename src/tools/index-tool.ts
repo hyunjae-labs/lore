@@ -8,6 +8,7 @@ import {
   insertChunkWithVector,
   updateSessionMetadata,
   deleteSessionChunks,
+  deleteProjectData,
 } from "../db/queries.js";
 import type { SessionRow } from "../db/queries.js";
 import { parseLine } from "../indexer/parser.js";
@@ -244,15 +245,7 @@ export async function handleIndex(
   const staleExclusions = userConfig.excluded_projects.filter((d) => !allDirNames.has(d));
   if (staleExclusions.length > 0) {
     for (const dirName of staleExclusions) {
-      const projectRow = db.prepare("SELECT id FROM projects WHERE dir_name = ?").get(dirName) as { id: number } | undefined;
-      if (projectRow) {
-        const sessions = db.prepare("SELECT id FROM sessions WHERE project_id = ?").all(projectRow.id) as { id: number }[];
-        for (const session of sessions) {
-          deleteSessionChunks(db, session.id);
-        }
-        db.prepare("DELETE FROM sessions WHERE project_id = ?").run(projectRow.id);
-        db.prepare("DELETE FROM projects WHERE id = ?").run(projectRow.id);
-      }
+      deleteProjectData(db, dirName);
     }
     userConfig.excluded_projects = userConfig.excluded_projects.filter((d) => allDirNames.has(d));
     saveUserConfig(userConfig);
@@ -314,7 +307,7 @@ async function runIndexInBackground(
     for (const { project, sessions } of projectSessions) {
       progress.currentProject = project.name;
 
-      const projectId = upsertProject(db, {
+      let projectId = upsertProject(db, {
         dir_name: project.dirName,
         path: project.dirPath,
         name: project.name,
@@ -322,13 +315,13 @@ async function runIndexInBackground(
 
       if (forceMode === "rebuild") {
         // Delete all sessions and chunks for this project before re-indexing from disk
-        const existingSessions = db
-          .prepare("SELECT id FROM sessions WHERE project_id = ?")
-          .all(projectId) as { id: number }[];
-        for (const session of existingSessions) {
-          deleteSessionChunks(db, session.id);
-        }
-        db.prepare("DELETE FROM sessions WHERE project_id = ?").run(projectId);
+        deleteProjectData(db, project.dirName);
+        // Re-create project row since deleteProjectData removes it
+        projectId = upsertProject(db, {
+          dir_name: project.dirName,
+          path: project.dirPath,
+          name: project.name,
+        });
       }
 
       for (const sessionInfo of sessions) {

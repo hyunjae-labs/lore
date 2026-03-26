@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { loadUserConfig, saveUserConfig, CONFIG } from "../config.js";
 import { scanProjects, scanSessions } from "../indexer/scanner.js";
-import { deleteSessionChunks } from "../db/queries.js";
+import { deleteProjectData } from "../db/queries.js";
 import { getIndexProgress } from "./index-tool.js";
 import { toolResult, toolError } from "./helpers.js";
 import { pathToDirName } from "../utils/path.js";
@@ -52,7 +52,7 @@ export async function handleManageProjects(
   params: ManageProjectsParams
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   const config = loadUserConfig();
-  const projectsBaseDir = process.env.CLAUDE_PROJECTS_DIR ?? CONFIG.claudeProjectsDir;
+  const projectsBaseDir = CONFIG.claudeProjectsDir;
   const allProjects = scanProjects(projectsBaseDir);
   const excludedSet = new Set(config.excluded_projects);
 
@@ -64,7 +64,6 @@ export async function handleManageProjects(
         dir_name: p.dirName,
         name: p.name,
         session_count: sessions.length,
-        status: isExcluded ? "excluded" as const : "indexed" as const,
         excluded: isExcluded,
       };
     });
@@ -82,7 +81,7 @@ export async function handleManageProjects(
       excluded_count: visible.filter((p) => p.excluded).length,
       hidden_empty: hidden > 0 ? `${hidden} projects with 0 sessions hidden` : undefined,
       projects: visible,
-      hint: "Use action 'exclude' to stop indexing a project, 'include' to undo an exclusion.",
+      hint: "Use 'exclude' to stop indexing a project, 'include' to re-enable it. The 'excluded' boolean indicates current state.",
     });
   }
 
@@ -111,16 +110,7 @@ export async function handleManageProjects(
       excludedSet.add(match.dirName);
 
       // Clean DB data (chunks, sessions, project) but NEVER touch .jsonl files
-      const project = db.prepare("SELECT id FROM projects WHERE dir_name = ?").get(match.dirName) as { id: number } | undefined;
-      if (project) {
-        const sessions = db.prepare("SELECT id FROM sessions WHERE project_id = ?").all(project.id) as { id: number }[];
-        for (const session of sessions) {
-          deleteSessionChunks(db, session.id);
-        }
-        sessionsDeleted += sessions.length;
-        db.prepare("DELETE FROM sessions WHERE project_id = ?").run(project.id);
-        db.prepare("DELETE FROM projects WHERE id = ?").run(project.id);
-      }
+      sessionsDeleted += deleteProjectData(db, match.dirName);
       excluded.push(match.dirName);
     }
 

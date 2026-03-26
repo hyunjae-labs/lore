@@ -393,6 +393,18 @@ export function getAdjacentChunks(
   return { before: beforeRows, after: afterRows };
 }
 
+export function deleteProjectData(db: Database.Database, dirName: string): number {
+  const project = db.prepare("SELECT id FROM projects WHERE dir_name = ?").get(dirName) as { id: number } | undefined;
+  if (!project) return 0;
+  const sessions = db.prepare("SELECT id FROM sessions WHERE project_id = ?").all(project.id) as { id: number }[];
+  for (const session of sessions) {
+    deleteSessionChunks(db, session.id);
+  }
+  db.prepare("DELETE FROM sessions WHERE project_id = ?").run(project.id);
+  db.prepare("DELETE FROM projects WHERE id = ?").run(project.id);
+  return sessions.length;
+}
+
 export function getSessionCount(db: Database.Database): number {
   const row = db.prepare("SELECT COUNT(*) as count FROM sessions").get() as {
     count: number;

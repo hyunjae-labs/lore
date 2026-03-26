@@ -77,9 +77,8 @@ describe("manage_projects", () => {
     const response = await handleManageProjects(db, { action: "list" });
     const result = JSON.parse(response.content[0].text);
 
-    // All visible projects should have status "indexed"
+    // All visible projects should not be excluded by default (opt-out model)
     for (const p of result.projects) {
-      expect(p.status).toBe("indexed");
       expect(p.excluded).toBe(false);
     }
     db.close();
@@ -132,7 +131,6 @@ describe("manage_projects", () => {
     expect(result.excluded_count).toBe(1);
     const alpha = result.projects.find((p: any) => p.dir_name === "-Users-test-alpha");
     expect(alpha.excluded).toBe(true);
-    expect(alpha.status).toBe("excluded");
     db.close();
   });
 
