@@ -1,6 +1,6 @@
 {
   "name": "lore",
-  "version": "0.2.33",
+  "version": "0.2.34",
   "description": "Semantic search skill + MCP server for Claude Code conversation history",
   "author": {
     "name": "hyunjae-labs",
@@ -11,7 +11,6 @@
   "license": "MIT",
   "keywords": ["skill", "mcp", "claude", "search", "semantic", "rag", "lore"],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "lore": {
       "command": "npx",

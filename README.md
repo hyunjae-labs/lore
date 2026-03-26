@@ -17,14 +17,14 @@ Find anything you've ever discussed -- across all projects, all sessions, any br
 - **Fully local, zero API keys**
   Everything runs on your machine. ONNX Runtime for embedding, sqlite-vec for storage. No data leaves your device.
 
-- **Auto-index on search**
-  Search returns instantly using the existing index. The current session is then indexed in the background so new content appears in the next search. No hooks, no cron jobs, no blocking.
+- **Auto-index on session end**
+  A SessionEnd hook automatically indexes all new sessions in the background. No manual triggers needed.
 
 - **Background indexing**
   Manual index triggers return instantly. Monitor progress while you keep working. Search what's already indexed while the rest catches up.
 
-- **Project-selective**
-  Register only the projects you care about. Add or remove anytime. Unregistering deletes indexed data to keep things clean.
+- **Opt-out by default**
+  All projects are indexed automatically. Exclude the ones you don't want. No registration needed.
 
 - **Conversation-aware chunking**
   Splits by logical turns (user question + full assistant response chain), not arbitrary token windows. Handles tool-use chains, thinking blocks, and multi-step interactions correctly.
@@ -81,23 +81,20 @@ Claude: [calls lore search] Found 3 relevant conversations...
 
 **First time setup:**
 
-1. **Browse projects** -- lore shows all your Claude Code projects
-2. **Register** -- pick which ones to index
-3. **Index** -- runs in background, takes ~15 seconds per project
-4. **Search** -- ask anything about past conversations
+1. **Index** -- `index()` scans all projects automatically, runs in background
+2. **Search** -- ask anything about past conversations
+3. **Exclude** (optional) -- hide noisy projects you don't care about
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
-| `manage_projects` | Register/unregister projects for indexing |
-| `index` | Start background indexing. Modes: `incremental` (default), `rebuild` (requires `confirm: true`), `cancel` |
+| `manage_projects` | Exclude/include projects from indexing (opt-out model) |
+| `index` | Start background indexing. All non-excluded projects. Modes: `incremental` (default), `rebuild`, `cancel` |
 | `status` | Check indexing progress, ETA, skip reasons, DB health |
 | `search` | Semantic + keyword search across conversations |
 | `get_context` | Expand search results with surrounding conversation |
 | `list_sessions` | Browse indexed sessions by project |
-
-> `rebuild` mode requires `confirm: true` as a safety gate — the parameter is hidden from the tool schema, so the AI must ask you before triggering a destructive reindex.
 
 ## Why This Exists
 
@@ -125,7 +122,7 @@ Existing tools either require cloud APIs, spawn zombie processes, or treat conve
 
 **Storage:** Single SQLite file at `~/.lore/lore.db` with WAL mode for concurrent reads.
 
-**Config:** Project registration stored in `~/.lore/config.json`.
+**Config:** Project exclusions stored in `~/.lore/config.json`.
 
 <details>
 <summary><strong>Configuration</strong></summary>
@@ -158,9 +155,9 @@ Measured on Apple Silicon (M-series):
 <details>
 <summary><strong>Troubleshooting</strong></summary>
 
-### "No projects registered"
+### "No sessions found"
 
-Run `manage_projects` with action `list` to see available projects, then `add` the ones you want.
+Run `manage_projects` with action `list` to see available projects. All are indexed by default unless excluded.
 
 ### Stale lock file
 
@@ -179,7 +176,7 @@ git clone https://github.com/hyunjae-labs/lore.git
 cd lore
 npm install
 npm run build
-npm test          # 114 tests
+npm test          # 118 tests
 ```
 
 ## Tech Stack
