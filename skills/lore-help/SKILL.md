@@ -81,7 +81,7 @@ Control which projects are indexed using an opt-out model. All projects are inde
 
 | Action | Description |
 |--------|-------------|
-| `list` | Show all projects on disk with `status: "indexed"/"excluded"` |
+| `list` | Show all projects on disk with `excluded: true/false` |
 | `exclude` | Stop indexing a project + delete all its indexed data from DB |
 | `include` | Undo an exclusion -- next index run will pick it up |
 

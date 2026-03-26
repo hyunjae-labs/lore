@@ -1,4 +1,6 @@
-# Simplify Project Management & Add Orphan Cleanup
+# [OBSOLETE] Simplify Project Management & Add Orphan Cleanup
+
+> **This plan is OBSOLETE.** It proposed migrating to an opt-in (whitelist) model with `indexed_projects`, `add`/`remove` actions, and `scope: "all"`. The project instead adopted an **opt-out (blacklist) model** with `excluded_projects`, `exclude`/`include` actions. All code references below are stale and do not reflect the current implementation.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

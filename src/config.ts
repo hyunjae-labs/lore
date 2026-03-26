@@ -34,7 +34,7 @@ export function loadUserConfig(): UserConfig {
   try {
     const raw = readFileSync(getConfigPath(), "utf-8");
     const parsed = JSON.parse(raw);
-    // Migration: if old config has indexed_projects but no excluded_projects, return default
+    // Parse excluded_projects from config, falling back to empty array
     return {
       excluded_projects: Array.isArray(parsed.excluded_projects) ? parsed.excluded_projects : [],
     };
