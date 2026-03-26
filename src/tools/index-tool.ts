@@ -15,6 +15,7 @@ import { parseLine } from "../indexer/parser.js";
 import { groupIntoLogicalTurns, chunkTurns } from "../indexer/chunker.js";
 import { getEmbedder } from "../embedder/index.js";
 import { scanProjects, scanSessions, needsReindex } from "../indexer/scanner.js";
+import type { SessionInfo } from "../indexer/scanner.js";
 
 import { loadUserConfig, saveUserConfig } from "../config.js";
 import { pathToDirName } from "../utils/path.js";
@@ -124,15 +125,15 @@ function pruneOrphanSessions(
 ): number {
   let pruned = 0;
 
+  const selectProject = db.prepare("SELECT id FROM projects WHERE dir_name = ?");
+  const selectSessions = db.prepare("SELECT id, session_id FROM sessions WHERE project_id = ?");
+  const deleteSession = db.prepare("DELETE FROM sessions WHERE id = ?");
+
   for (const project of projectsToIndex) {
-    const projectRow = db
-      .prepare("SELECT id FROM projects WHERE dir_name = ?")
-      .get(project.dirName) as { id: number } | undefined;
+    const projectRow = selectProject.get(project.dirName) as { id: number } | undefined;
     if (!projectRow) continue;
 
-    const dbSessions = db
-      .prepare("SELECT id, session_id FROM sessions WHERE project_id = ?")
-      .all(projectRow.id) as Array<{ id: number; session_id: string }>;
+    const dbSessions = selectSessions.all(projectRow.id) as Array<{ id: number; session_id: string }>;
     if (dbSessions.length === 0) continue;
 
     let diskFiles: Set<string>;
@@ -147,7 +148,7 @@ function pruneOrphanSessions(
     for (const dbSession of dbSessions) {
       if (!diskFiles.has(dbSession.session_id)) {
         deleteSessionChunks(db, dbSession.id);
-        db.prepare("DELETE FROM sessions WHERE id = ?").run(dbSession.id);
+        deleteSession.run(dbSession.id);
         pruned++;
       }
     }
@@ -244,9 +245,11 @@ export async function handleIndex(
   const allDirNames = new Set(allProjects.map((p) => p.dirName));
   const staleExclusions = userConfig.excluded_projects.filter((d) => !allDirNames.has(d));
   if (staleExclusions.length > 0) {
-    for (const dirName of staleExclusions) {
-      deleteProjectData(db, dirName);
-    }
+    db.transaction(() => {
+      for (const dirName of staleExclusions) {
+        deleteProjectData(db, dirName);
+      }
+    })();
     userConfig.excluded_projects = userConfig.excluded_projects.filter((d) => allDirNames.has(d));
     saveUserConfig(userConfig);
   }
@@ -287,6 +290,25 @@ export async function handleIndex(
   });
 }
 
+// ── Skip helper ──────────────────────────────────────────────────────────────
+
+function skipSession(
+  db: Database.Database,
+  sessionDbId: number,
+  sessionInfo: SessionInfo,
+  reason: keyof SkipReasons,
+  skipReasons: SkipReasons,
+): void {
+  skipReasons[reason]++;
+  updateSessionMetadata(db, {
+    session_id: sessionDbId,
+    indexed_at: new Date().toISOString(),
+    indexed_offset: sessionInfo.size,
+    jsonl_size: sessionInfo.size,
+    jsonl_mtime: sessionInfo.mtime,
+  });
+}
+
 // ── Background indexing ──────────────────────────────────────────────────────
 
 async function runIndexInBackground(
@@ -295,8 +317,6 @@ async function runIndexInBackground(
   projectSessions: Array<{ project: { dirName: string; dirPath: string; name: string }; sessions: Array<{ sessionId: string; jsonlPath: string; size: number; mtime: number }> }>,
   loreDir: string,
 ): Promise<void> {
-  const forceMode = params.mode ?? "default";
-
   try {
     const embedder = await getEmbedder();
 
@@ -313,7 +333,7 @@ async function runIndexInBackground(
         name: project.name,
       });
 
-      if (forceMode === "rebuild") {
+      if (params.mode === "rebuild") {
         // Delete all sessions and chunks for this project before re-indexing from disk
         deleteProjectData(db, project.dirName);
         // Re-create project row since deleteProjectData removes it
@@ -348,7 +368,7 @@ async function runIndexInBackground(
           existingOffset
         );
 
-        if (forceMode === "rebuild") {
+        if (params.mode === "rebuild") {
           reindexStrategy = "rebuild";
         }
 
@@ -376,27 +396,13 @@ async function runIndexInBackground(
           lines = readJsonlFromOffset(sessionInfo.jsonlPath, readOffset);
         } catch {
           progress.sessionsSkipped++;
-          progress.skipReasons.read_error++;
-          updateSessionMetadata(db, {
-            session_id: sessionDbId,
-            indexed_at: new Date().toISOString(),
-            indexed_offset: sessionInfo.size,
-            jsonl_size: sessionInfo.size,
-            jsonl_mtime: sessionInfo.mtime,
-          });
+          skipSession(db, sessionDbId, sessionInfo, "read_error", progress.skipReasons);
           continue;
         }
 
         if (lines.length === 0) {
           progress.sessionsSkipped++;
-          progress.skipReasons.empty_file++;
-          updateSessionMetadata(db, {
-            session_id: sessionDbId,
-            indexed_at: new Date().toISOString(),
-            indexed_offset: sessionInfo.size,
-            jsonl_size: sessionInfo.size,
-            jsonl_mtime: sessionInfo.mtime,
-          });
+          skipSession(db, sessionDbId, sessionInfo, "empty_file", progress.skipReasons);
           continue;
         }
 
@@ -404,14 +410,7 @@ async function runIndexInBackground(
 
         if (records.length === 0) {
           progress.sessionsSkipped++;
-          progress.skipReasons.no_parseable_content++;
-          updateSessionMetadata(db, {
-            session_id: sessionDbId,
-            indexed_at: new Date().toISOString(),
-            indexed_offset: sessionInfo.size,
-            jsonl_size: sessionInfo.size,
-            jsonl_mtime: sessionInfo.mtime,
-          });
+          skipSession(db, sessionDbId, sessionInfo, "no_parseable_content", progress.skipReasons);
           continue;
         }
 
@@ -439,14 +438,7 @@ async function runIndexInBackground(
 
         if (chunks.length === 0) {
           progress.sessionsSkipped++;
-          progress.skipReasons.no_chunks_after_processing++;
-          updateSessionMetadata(db, {
-            session_id: sessionDbId,
-            indexed_at: new Date().toISOString(),
-            indexed_offset: sessionInfo.size,
-            jsonl_size: sessionInfo.size,
-            jsonl_mtime: sessionInfo.mtime,
-          });
+          skipSession(db, sessionDbId, sessionInfo, "no_chunks_after_processing", progress.skipReasons);
           continue;
         }
 

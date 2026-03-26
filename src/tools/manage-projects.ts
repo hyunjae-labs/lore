@@ -101,20 +101,25 @@ export async function handleManageProjects(
     const skipped: string[] = [];
     let sessionsDeleted = 0;
 
+    // Separate matching from DB mutations so we can run deletes in a transaction
+    const toExclude: ProjectInfo[] = [];
     for (const match of matched) {
       if (excludedSet.has(match.dirName)) {
         skipped.push(match.dirName);
-        continue;
+      } else {
+        toExclude.push(match);
       }
-      config.excluded_projects.push(match.dirName);
-      excludedSet.add(match.dirName);
-
-      // Clean DB data (chunks, sessions, project) but NEVER touch .jsonl files
-      sessionsDeleted += deleteProjectData(db, match.dirName);
-      excluded.push(match.dirName);
     }
 
-    if (excluded.length > 0) {
+    if (toExclude.length > 0) {
+      db.transaction(() => {
+        for (const match of toExclude) {
+          config.excluded_projects.push(match.dirName);
+          excludedSet.add(match.dirName);
+          sessionsDeleted += deleteProjectData(db, match.dirName);
+          excluded.push(match.dirName);
+        }
+      })();
       saveUserConfig(config);
     }
 

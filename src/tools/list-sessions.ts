@@ -1,5 +1,4 @@
 import type Database from "better-sqlite3";
-import { loadUserConfig } from "../config.js";
 import { toolResult } from "./helpers.js";
 
 export interface ListSessionsParams {
@@ -16,7 +15,7 @@ export async function handleListSessions(
   const sortDir = params.sort === "oldest" ? "ASC" : "DESC";
 
   const filterConditions: string[] = [
-    "(SELECT COUNT(*) FROM chunks c WHERE c.session_id = s.id) > 0",
+    "sc.chunk_count > 0",
   ];
   const queryParams: unknown[] = [];
 
@@ -29,12 +28,17 @@ export async function handleListSessions(
 
   const sessions = db
     .prepare(
-      `SELECT s.session_id, p.path as project, p.name as project_name,
+      `WITH sc AS (
+         SELECT session_id, COUNT(*) as chunk_count
+         FROM chunks GROUP BY session_id
+       )
+       SELECT s.session_id, p.path as project, p.name as project_name,
               s.branch, s.started_at, s.model, s.intent, s.turn_count,
               s.indexed_at IS NOT NULL as indexed,
-              (SELECT COUNT(*) FROM chunks c WHERE c.session_id = s.id) as chunk_count
+              sc.chunk_count
        FROM sessions s
        JOIN projects p ON p.id = s.project_id
+       JOIN sc ON sc.session_id = s.id
        ${filterClause}
        ORDER BY s.started_at ${sortDir}
        LIMIT ?`
@@ -53,13 +57,10 @@ export async function handleListSessions(
       .get() as any
   ).count;
 
-  // Project summary with excluded status
-  const userConfig = loadUserConfig();
-  const excludedSet = new Set(userConfig.excluded_projects);
-
+  // Project summary
   const projects = db
     .prepare(
-      `SELECT p.dir_name, p.name, p.path, COUNT(s.id) as session_count
+      `SELECT p.name, p.path, COUNT(s.id) as session_count
        FROM projects p
        LEFT JOIN sessions s ON s.project_id = p.id
        GROUP BY p.id
@@ -78,7 +79,6 @@ export async function handleListSessions(
       name: p.name,
       path: p.path,
       session_count: p.session_count,
-      excluded: excludedSet.has(p.dir_name),
     })),
   };
 
