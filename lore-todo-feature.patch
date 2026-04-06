@@ -1,0 +1,1516 @@
+From d3842721bb8d482c9705d8aa2fa369a9eaa894b5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:20:07 +0900
+Subject: [PATCH 01/10] feat(todo): add todo/vec_todos/todos_fts schema SQL
+
+---
+ src/db/todo-schema.ts | 47 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+ create mode 100644 src/db/todo-schema.ts
+
+diff --git a/src/db/todo-schema.ts b/src/db/todo-schema.ts
+new file mode 100644
+index 0000000..1da64a3
+--- /dev/null
++++ b/src/db/todo-schema.ts
+@@ -0,0 +1,47 @@
++export const TODO_SCHEMA_SQL = `
++CREATE TABLE IF NOT EXISTS todos (
++  id          INTEGER PRIMARY KEY,
++  uuid        TEXT    UNIQUE NOT NULL,
++  title       TEXT    NOT NULL,
++  note        TEXT,
++  status      TEXT    NOT NULL DEFAULT 'todo',
++  priority    TEXT    NOT NULL DEFAULT 'medium',
++  tags        TEXT    NOT NULL DEFAULT '[]',
++  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
++  updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
++  completed_at TEXT,
++  archived_at  TEXT
++);
++`;
++
++export const TODO_VEC_SQL = `
++CREATE VIRTUAL TABLE IF NOT EXISTS vec_todos USING vec0(
++  embedding FLOAT[384]
++);
++`;
++
++export const TODO_FTS_SQL = `
++CREATE VIRTUAL TABLE IF NOT EXISTS todos_fts USING fts5(
++  title,
++  note,
++  content=todos,
++  content_rowid=id
++);
++
++CREATE TRIGGER IF NOT EXISTS todos_ai AFTER INSERT ON todos BEGIN
++  INSERT INTO todos_fts(rowid, title, note)
++  VALUES (new.id, new.title, COALESCE(new.note, ''));
++END;
++
++CREATE TRIGGER IF NOT EXISTS todos_ad AFTER DELETE ON todos BEGIN
++  INSERT INTO todos_fts(todos_fts, rowid, title, note)
++  VALUES('delete', old.id, old.title, COALESCE(old.note, ''));
++END;
++
++CREATE TRIGGER IF NOT EXISTS todos_au AFTER UPDATE ON todos BEGIN
++  INSERT INTO todos_fts(todos_fts, rowid, title, note)
++  VALUES('delete', old.id, old.title, COALESCE(old.note, ''));
++  INSERT INTO todos_fts(rowid, title, note)
++  VALUES (new.id, new.title, COALESCE(new.note, ''));
++END;
++`;
+-- 
+2.34.1
+
+
+From b2f1e61b64bad0ca6bceda1b6c1d45f02bf458ba Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:30:31 +0900
+Subject: [PATCH 02/10] test(todo): add failing tests for todo-queries (TDD)
+
+---
+ tests/todo-queries.test.ts | 165 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 165 insertions(+)
+ create mode 100644 tests/todo-queries.test.ts
+
+diff --git a/tests/todo-queries.test.ts b/tests/todo-queries.test.ts
+new file mode 100644
+index 0000000..cae44b6
+--- /dev/null
++++ b/tests/todo-queries.test.ts
+@@ -0,0 +1,165 @@
++import { describe, it, expect, beforeEach } from "vitest";
++import Database from "better-sqlite3";
++import * as sqliteVec from "sqlite-vec";
++import { TODO_SCHEMA_SQL, TODO_VEC_SQL, TODO_FTS_SQL } from "../src/db/todo-schema.js";
++import {
++  insertTodo,
++  listTodos,
++  getTodoByUuid,
++  updateTodo,
++  completeTodo,
++  archiveTodo,
++  todoHybridSearch,
++} from "../src/db/todo-queries.js";
++
++function makeDb(): Database.Database {
++  const db = new Database(":memory:");
++  sqliteVec.load(db);
++  db.pragma("journal_mode = WAL");
++  db.exec(TODO_SCHEMA_SQL);
++  db.exec(TODO_VEC_SQL);
++  db.exec(TODO_FTS_SQL);
++  return db;
++}
++
++const DUMMY_EMBEDDING = new Float32Array(384).fill(0.1);
++
++describe("todo-queries", () => {
++  let db: Database.Database;
++
++  beforeEach(() => {
++    db = makeDb();
++  });
++
++  describe("insertTodo", () => {
++    it("returns uuid and todo is retrievable", () => {
++      const uuid = insertTodo(db, {
++        title: "노트북 구매 집행품의 작성",
++        embedding: DUMMY_EMBEDDING,
++      });
++      expect(typeof uuid).toBe("string");
++      expect(uuid.length).toBeGreaterThan(0);
++
++      const todo = getTodoByUuid(db, uuid);
++      expect(todo).not.toBeNull();
++      expect(todo!.title).toBe("노트북 구매 집행품의 작성");
++      expect(todo!.status).toBe("todo");
++      expect(todo!.priority).toBe("medium");
++    });
++
++    it("stores note and tags", () => {
++      const uuid = insertTodo(db, {
++        title: "WBS 생성 요청",
++        note: "김혁수 연구원에게 요청",
++        tags: ["업무", "구매"],
++        embedding: DUMMY_EMBEDDING,
++      });
++      const todo = getTodoByUuid(db, uuid);
++      expect(todo!.note).toBe("김혁수 연구원에게 요청");
++      expect(JSON.parse(todo!.tags)).toEqual(["업무", "구매"]);
++    });
++  });
++
++  describe("listTodos", () => {
++    it("기본값: 미완료(todo/in_progress)만 반환", () => {
++      const uuid1 = insertTodo(db, { title: "할일1", embedding: DUMMY_EMBEDDING });
++      const uuid2 = insertTodo(db, { title: "할일2", embedding: DUMMY_EMBEDDING });
++      completeTodo(db, uuid2);
++
++      const results = listTodos(db, {});
++      expect(results.map(r => r.uuid)).toContain(uuid1);
++      expect(results.map(r => r.uuid)).not.toContain(uuid2);
++    });
++
++    it("status=all이면 완료 포함", () => {
++      const uuid1 = insertTodo(db, { title: "할일", embedding: DUMMY_EMBEDDING });
++      completeTodo(db, uuid1);
++      const results = listTodos(db, { status: "all" });
++      expect(results.map(r => r.uuid)).toContain(uuid1);
++    });
++
++    it("archived는 기본적으로 숨김", () => {
++      const uuid1 = insertTodo(db, { title: "할일", embedding: DUMMY_EMBEDDING });
++      archiveTodo(db, uuid1);
++      const results = listTodos(db, { status: "all" });
++      expect(results.map(r => r.uuid)).not.toContain(uuid1);
++    });
++
++    it("includeArchived=true면 archived 포함", () => {
++      const uuid1 = insertTodo(db, { title: "할일", embedding: DUMMY_EMBEDDING });
++      archiveTodo(db, uuid1);
++      const results = listTodos(db, { includeArchived: true });
++      expect(results.map(r => r.uuid)).toContain(uuid1);
++    });
++  });
++
++  describe("updateTodo", () => {
++    it("title과 note를 수정한다", () => {
++      const uuid = insertTodo(db, { title: "원래 제목", embedding: DUMMY_EMBEDDING });
++      const updated = updateTodo(db, { uuid, title: "새 제목", note: "메모 추가", embedding: DUMMY_EMBEDDING });
++      expect(updated).not.toBeNull();
++      expect(updated!.title).toBe("새 제목");
++      expect(updated!.note).toBe("메모 추가");
++    });
++
++    it("존재하지 않는 uuid면 null 반환", () => {
++      const result = updateTodo(db, { uuid: "nonexistent", title: "x", embedding: DUMMY_EMBEDDING });
++      expect(result).toBeNull();
++    });
++  });
++
++  describe("completeTodo", () => {
++    it("status를 done으로 변경하고 completed_at 설정", () => {
++      const uuid = insertTodo(db, { title: "할일", embedding: DUMMY_EMBEDDING });
++      const result = completeTodo(db, uuid);
++      expect(result).not.toBeNull();
++      expect(result!.status).toBe("done");
++      expect(result!.completed_at).not.toBeNull();
++    });
++
++    it("이미 완료된 todo 재완료해도 에러 없음", () => {
++      const uuid = insertTodo(db, { title: "할일", embedding: DUMMY_EMBEDDING });
++      completeTodo(db, uuid);
++      const result = completeTodo(db, uuid);
++      expect(result!.status).toBe("done");
++    });
++  });
++
++  describe("archiveTodo", () => {
++    it("archived_at을 설정한다", () => {
++      const uuid = insertTodo(db, { title: "할일", embedding: DUMMY_EMBEDDING });
++      const result = archiveTodo(db, uuid);
++      expect(result).not.toBeNull();
++      expect(result!.archived_at).not.toBeNull();
++    });
++  });
++
++  describe("todoHybridSearch", () => {
++    it("title 키워드로 검색된다", () => {
++      const uuid = insertTodo(db, {
++        title: "집행품의 실장 결재 요청",
++        embedding: DUMMY_EMBEDDING,
++      });
++      insertTodo(db, { title: "전혀 무관한 할일", embedding: DUMMY_EMBEDDING });
++
++      const results = todoHybridSearch(db, {
++        embedding: DUMMY_EMBEDDING,
++        query: "집행품의",
++        limit: 10,
++      });
++      expect(results.map(r => r.uuid)).toContain(uuid);
++    });
++
++    it("archived는 기본으로 검색 제외", () => {
++      const uuid = insertTodo(db, { title: "집행품의", embedding: DUMMY_EMBEDDING });
++      archiveTodo(db, uuid);
++
++      const results = todoHybridSearch(db, {
++        embedding: DUMMY_EMBEDDING,
++        query: "집행품의",
++        limit: 10,
++      });
++      expect(results.map(r => r.uuid)).not.toContain(uuid);
++    });
++  });
++});
+-- 
+2.34.1
+
+
+From 9e2d04a02cb0f622e6994d6f5c0efefb4ff70518 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:33:23 +0900
+Subject: [PATCH 03/10] feat(todo): implement todo-queries with hybrid search
+ (TDD green)
+
+---
+ src/db/todo-queries.ts | 264 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 264 insertions(+)
+ create mode 100644 src/db/todo-queries.ts
+
+diff --git a/src/db/todo-queries.ts b/src/db/todo-queries.ts
+new file mode 100644
+index 0000000..9306113
+--- /dev/null
++++ b/src/db/todo-queries.ts
+@@ -0,0 +1,264 @@
++import type Database from "better-sqlite3";
++import { randomUUID } from "node:crypto";
++
++export interface TodoRow {
++  id: number;
++  uuid: string;
++  title: string;
++  note: string | null;
++  status: string;
++  priority: string;
++  tags: string; // JSON string
++  created_at: string;
++  updated_at: string;
++  completed_at: string | null;
++  archived_at: string | null;
++}
++
++export interface TodoSearchResult extends TodoRow {
++  score: number;
++}
++
++export function insertTodo(
++  db: Database.Database,
++  params: {
++    title: string;
++    note?: string;
++    status?: string;
++    priority?: string;
++    tags?: string[];
++    embedding: Float32Array;
++  }
++): string {
++  const uuid = randomUUID();
++  const now = new Date().toISOString();
++
++  const insertRow = db.prepare(`
++    INSERT INTO todos (uuid, title, note, status, priority, tags, created_at, updated_at)
++    VALUES (@uuid, @title, @note, @status, @priority, @tags, @created_at, @updated_at)
++  `);
++
++  const insertVec = db.prepare(`
++    INSERT INTO vec_todos (rowid, embedding) VALUES (?, ?)
++  `);
++
++  const transaction = db.transaction(() => {
++    const result = insertRow.run({
++      uuid,
++      title: params.title,
++      note: params.note ?? null,
++      status: params.status ?? "todo",
++      priority: params.priority ?? "medium",
++      tags: JSON.stringify(params.tags ?? []),
++      created_at: now,
++      updated_at: now,
++    });
++    const rowId = result.lastInsertRowid as number;
++    insertVec.run(BigInt(rowId), Buffer.from(params.embedding.buffer));
++  });
++
++  transaction();
++  return uuid;
++}
++
++export function getTodoByUuid(
++  db: Database.Database,
++  uuid: string
++): TodoRow | null {
++  return (
++    (db
++      .prepare("SELECT * FROM todos WHERE uuid = ?")
++      .get(uuid) as TodoRow | undefined) ?? null
++  );
++}
++
++export function listTodos(
++  db: Database.Database,
++  params: {
++    status?: string;
++    priority?: string;
++    includeArchived?: boolean;
++    limit?: number;
++  }
++): TodoRow[] {
++  const conditions: string[] = [];
++  const args: unknown[] = [];
++
++  if (!params.includeArchived) {
++    conditions.push("archived_at IS NULL");
++  }
++
++  if (params.status && params.status !== "all") {
++    conditions.push("status = ?");
++    args.push(params.status);
++  } else if (!params.status) {
++    conditions.push("status IN ('todo', 'in_progress')");
++  }
++
++  if (params.priority) {
++    conditions.push("priority = ?");
++    args.push(params.priority);
++  }
++
++  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
++  const limit = params.limit ?? 100;
++
++  return db
++    .prepare(`SELECT * FROM todos ${where} ORDER BY created_at DESC LIMIT ?`)
++    .all(...args, limit) as TodoRow[];
++}
++
++export function updateTodo(
++  db: Database.Database,
++  params: {
++    uuid: string;
++    title?: string;
++    note?: string;
++    status?: string;
++    priority?: string;
++    tags?: string[];
++    embedding: Float32Array;
++  }
++): TodoRow | null {
++  const existing = getTodoByUuid(db, params.uuid);
++  if (!existing) return null;
++
++  const now = new Date().toISOString();
++
++  const updateRow = db.prepare(`
++    UPDATE todos SET
++      title      = COALESCE(@title, title),
++      note       = COALESCE(@note, note),
++      status     = COALESCE(@status, status),
++      priority   = COALESCE(@priority, priority),
++      tags       = COALESCE(@tags, tags),
++      updated_at = @updated_at
++    WHERE uuid = @uuid
++  `);
++
++  const updateVec = db.prepare(`
++    UPDATE vec_todos SET embedding = ? WHERE rowid = ?
++  `);
++
++  const transaction = db.transaction(() => {
++    updateRow.run({
++      uuid: params.uuid,
++      title: params.title ?? null,
++      note: params.note ?? null,
++      status: params.status ?? null,
++      priority: params.priority ?? null,
++      tags: params.tags ? JSON.stringify(params.tags) : null,
++      updated_at: now,
++    });
++    updateVec.run(Buffer.from(params.embedding.buffer), BigInt(existing.id));
++  });
++
++  transaction();
++  return getTodoByUuid(db, params.uuid);
++}
++
++export function completeTodo(
++  db: Database.Database,
++  uuid: string
++): TodoRow | null {
++  const existing = getTodoByUuid(db, uuid);
++  if (!existing) return null;
++
++  const now = new Date().toISOString();
++  db.prepare(`
++    UPDATE todos SET status = 'done', completed_at = @now, updated_at = @now
++    WHERE uuid = @uuid
++  `).run({ uuid, now });
++
++  return getTodoByUuid(db, uuid);
++}
++
++export function archiveTodo(
++  db: Database.Database,
++  uuid: string
++): TodoRow | null {
++  const existing = getTodoByUuid(db, uuid);
++  if (!existing) return null;
++
++  const now = new Date().toISOString();
++  db.prepare(`
++    UPDATE todos SET archived_at = @now, updated_at = @now WHERE uuid = @uuid
++  `).run({ uuid, now });
++
++  return getTodoByUuid(db, uuid);
++}
++
++export function todoHybridSearch(
++  db: Database.Database,
++  params: {
++    embedding: Float32Array;
++    query: string;
++    limit: number;
++    status?: string;
++    includeArchived?: boolean;
++  }
++): TodoSearchResult[] {
++  const overFetchLimit = params.limit * 5;
++  const RRF_K = 60;
++
++  const vecRows = db
++    .prepare(
++      `SELECT rowid, distance FROM vec_todos
++       WHERE embedding MATCH ?
++       ORDER BY distance ASC LIMIT ?`
++    )
++    .all(Buffer.from(params.embedding.buffer), overFetchLimit) as {
++    rowid: number;
++    distance: number;
++  }[];
++
++  let ftsRows: { rowid: number; rank: number }[] = [];
++  try {
++    ftsRows = db
++      .prepare(
++        `SELECT rowid, rank FROM todos_fts
++         WHERE todos_fts MATCH ?
++         ORDER BY rank LIMIT ?`
++      )
++      .all(params.query, overFetchLimit) as { rowid: number; rank: number }[];
++  } catch {
++    // FTS special character error — fall back to vector only
++  }
++
++  const rrfScores = new Map<number, number>();
++  vecRows.forEach((r, i) => {
++    rrfScores.set(r.rowid, (rrfScores.get(r.rowid) || 0) + 1 / (RRF_K + i));
++  });
++  ftsRows.forEach((r, i) => {
++    rrfScores.set(r.rowid, (rrfScores.get(r.rowid) || 0) + 1 / (RRF_K + i));
++  });
++
++  if (rrfScores.size === 0) return [];
++
++  const allRowids = [...rrfScores.keys()];
++  const placeholders = allRowids.map(() => "?").join(",");
++  const conditions: string[] = [`id IN (${placeholders})`];
++  const args: unknown[] = [...allRowids];
++
++  if (!params.includeArchived) {
++    conditions.push("archived_at IS NULL");
++  }
++  if (params.status && params.status !== "all") {
++    conditions.push("status = ?");
++    args.push(params.status);
++  }
++
++  const rows = db
++    .prepare(`SELECT * FROM todos WHERE ${conditions.join(" AND ")}`)
++    .all(...args) as TodoRow[];
++
++  const maxRrf = Math.max(...rows.map((r) => rrfScores.get(r.id) || 0), 0.001);
++
++  return rows
++    .map((row) => ({
++      ...row,
++      score: Math.round(((rrfScores.get(row.id) || 0) / maxRrf) * 100) / 100,
++    }))
++    .sort((a, b) => b.score - a.score)
++    .slice(0, params.limit);
++}
+-- 
+2.34.1
+
+
+From fed2ee7a2361c6fb17c9a5b24579fef1d7d5b0a7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:38:10 +0900
+Subject: [PATCH 04/10] fix(todo): fix all code quality issues in todo-queries
+ (zero tolerance)
+
+---
+ src/db/todo-queries.ts     | 26 +++++++++++++++-----------
+ tests/todo-queries.test.ts |  6 +++++-
+ 2 files changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/src/db/todo-queries.ts b/src/db/todo-queries.ts
+index 9306113..94c8046 100644
+--- a/src/db/todo-queries.ts
++++ b/src/db/todo-queries.ts
+@@ -1,6 +1,9 @@
+ import type Database from "better-sqlite3";
+ import { randomUUID } from "node:crypto";
+ 
++// better-sqlite3 accepted binding parameter types
++type BindingParameter = string | number | bigint | Buffer | null;
++
+ export interface TodoRow {
+   id: number;
+   uuid: string;
+@@ -53,12 +56,11 @@ export function insertTodo(
+       created_at: now,
+       updated_at: now,
+     });
+-    const rowId = result.lastInsertRowid as number;
+-    insertVec.run(BigInt(rowId), Buffer.from(params.embedding.buffer));
++    insertVec.run(BigInt(result.lastInsertRowid), Buffer.from(params.embedding.buffer));
++    return uuid;
+   });
+ 
+-  transaction();
+-  return uuid;
++  return transaction();
+ }
+ 
+ export function getTodoByUuid(
+@@ -82,7 +84,7 @@ export function listTodos(
+   }
+ ): TodoRow[] {
+   const conditions: string[] = [];
+-  const args: unknown[] = [];
++  const args: BindingParameter[] = [];
+ 
+   if (!params.includeArchived) {
+     conditions.push("archived_at IS NULL");
+@@ -113,7 +115,7 @@ export function updateTodo(
+   params: {
+     uuid: string;
+     title?: string;
+-    note?: string;
++    note?: string | null;
+     status?: string;
+     priority?: string;
+     tags?: string[];
+@@ -144,7 +146,7 @@ export function updateTodo(
+     updateRow.run({
+       uuid: params.uuid,
+       title: params.title ?? null,
+-      note: params.note ?? null,
++      note: params.note !== undefined ? params.note : null,
+       status: params.status ?? null,
+       priority: params.priority ?? null,
+       tags: params.tags ? JSON.stringify(params.tags) : null,
+@@ -163,6 +165,7 @@ export function completeTodo(
+ ): TodoRow | null {
+   const existing = getTodoByUuid(db, uuid);
+   if (!existing) return null;
++  if (existing.status === "done") return existing; // already complete, preserve completed_at
+ 
+   const now = new Date().toISOString();
+   db.prepare(`
+@@ -208,7 +211,7 @@ export function todoHybridSearch(
+        ORDER BY distance ASC LIMIT ?`
+     )
+     .all(Buffer.from(params.embedding.buffer), overFetchLimit) as {
+-    rowid: number;
++    rowid: bigint;
+     distance: number;
+   }[];
+ 
+@@ -218,7 +221,7 @@ export function todoHybridSearch(
+       .prepare(
+         `SELECT rowid, rank FROM todos_fts
+          WHERE todos_fts MATCH ?
+-         ORDER BY rank LIMIT ?`
++         ORDER BY rank ASC LIMIT ?`
+       )
+       .all(params.query, overFetchLimit) as { rowid: number; rank: number }[];
+   } catch {
+@@ -227,7 +230,8 @@ export function todoHybridSearch(
+ 
+   const rrfScores = new Map<number, number>();
+   vecRows.forEach((r, i) => {
+-    rrfScores.set(r.rowid, (rrfScores.get(r.rowid) || 0) + 1 / (RRF_K + i));
++    const key = Number(r.rowid);
++    rrfScores.set(key, (rrfScores.get(key) || 0) + 1 / (RRF_K + i));
+   });
+   ftsRows.forEach((r, i) => {
+     rrfScores.set(r.rowid, (rrfScores.get(r.rowid) || 0) + 1 / (RRF_K + i));
+@@ -238,7 +242,7 @@ export function todoHybridSearch(
+   const allRowids = [...rrfScores.keys()];
+   const placeholders = allRowids.map(() => "?").join(",");
+   const conditions: string[] = [`id IN (${placeholders})`];
+-  const args: unknown[] = [...allRowids];
++  const args: BindingParameter[] = [...allRowids];
+ 
+   if (!params.includeArchived) {
+     conditions.push("archived_at IS NULL");
+diff --git a/tests/todo-queries.test.ts b/tests/todo-queries.test.ts
+index cae44b6..d178388 100644
+--- a/tests/todo-queries.test.ts
++++ b/tests/todo-queries.test.ts
+@@ -1,4 +1,4 @@
+-import { describe, it, expect, beforeEach } from "vitest";
++import { describe, it, expect, beforeEach, afterEach } from "vitest";
+ import Database from "better-sqlite3";
+ import * as sqliteVec from "sqlite-vec";
+ import { TODO_SCHEMA_SQL, TODO_VEC_SQL, TODO_FTS_SQL } from "../src/db/todo-schema.js";
+@@ -31,6 +31,10 @@ describe("todo-queries", () => {
+     db = makeDb();
+   });
+ 
++  afterEach(() => {
++    db.close();
++  });
++
+   describe("insertTodo", () => {
+     it("returns uuid and todo is retrievable", () => {
+       const uuid = insertTodo(db, {
+-- 
+2.34.1
+
+
+From 5b992023b90a6c5451e5a1d3a6de6e9af4a64190 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:42:14 +0900
+Subject: [PATCH 05/10] feat(todo): register todo tables in db init
+
+---
+ src/db/index.ts  | 4 ++++
+ tests/db.test.ts | 1 +
+ 2 files changed, 5 insertions(+)
+
+diff --git a/src/db/index.ts b/src/db/index.ts
+index 1d9ab7b..3c5289a 100644
+--- a/src/db/index.ts
++++ b/src/db/index.ts
+@@ -3,6 +3,7 @@ import * as sqliteVec from "sqlite-vec";
+ import { mkdirSync } from "node:fs";
+ import { dirname } from "node:path";
+ import { SCHEMA_SQL, VEC_TABLE_SQL, FTS_TABLE_SQL } from "./schema.js";
++import { TODO_SCHEMA_SQL, TODO_VEC_SQL, TODO_FTS_SQL } from "./todo-schema.js";
+ 
+ let db: Database.Database | null = null;
+ 
+@@ -25,6 +26,9 @@ export function getDb(dbPath: string): Database.Database {
+   db.exec(SCHEMA_SQL);
+   db.exec(VEC_TABLE_SQL);
+   db.exec(FTS_TABLE_SQL);
++  db.exec(TODO_SCHEMA_SQL);
++  db.exec(TODO_VEC_SQL);
++  db.exec(TODO_FTS_SQL);
+ 
+   return db;
+ }
+diff --git a/tests/db.test.ts b/tests/db.test.ts
+index d09944e..94a879c 100644
+--- a/tests/db.test.ts
++++ b/tests/db.test.ts
+@@ -29,6 +29,7 @@ describe("Database", () => {
+     expect(names).toContain("projects");
+     expect(names).toContain("sessions");
+     expect(names).toContain("chunks");
++    expect(names).toContain("todos");
+   });
+ 
+   it("creates vec_chunks virtual table", () => {
+-- 
+2.34.1
+
+
+From 9009d7435d2b5178f6bae0106d507922068e6a09 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:43:55 +0900
+Subject: [PATCH 06/10] fix(todo): fix unused import in index.ts and missing
+ query param in db tests
+
+---
+ tests/db.test.ts | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/tests/db.test.ts b/tests/db.test.ts
+index 94a879c..bcfa28b 100644
+--- a/tests/db.test.ts
++++ b/tests/db.test.ts
+@@ -339,7 +339,7 @@ describe("Database", () => {
+ 
+     it("returns results sorted by score descending", () => {
+       const query = new Float32Array(384).fill(0.9);
+-      const results = vectorSearch(db, { embedding: query, limit: 3 });
++      const results = vectorSearch(db, { embedding: query, query: "", limit: 3 });
+ 
+       expect(results.length).toBeGreaterThan(0);
+       // Results should be sorted by score descending
+@@ -350,13 +350,13 @@ describe("Database", () => {
+ 
+     it("respects limit", () => {
+       const query = new Float32Array(384).fill(0.5);
+-      const results = vectorSearch(db, { embedding: query, limit: 1 });
++      const results = vectorSearch(db, { embedding: query, query: "", limit: 1 });
+       expect(results.length).toBeLessThanOrEqual(1);
+     });
+ 
+     it("includes project and session metadata", () => {
+       const query = new Float32Array(384).fill(0.9);
+-      const results = vectorSearch(db, { embedding: query, limit: 3 });
++      const results = vectorSearch(db, { embedding: query, query: "", limit: 3 });
+ 
+       if (results.length > 0) {
+         expect(results[0].project_name).toBe("Search Test");
+@@ -368,7 +368,7 @@ describe("Database", () => {
+ 
+     it("includes has_more_before and has_more_after flags", () => {
+       const query = new Float32Array(384).fill(0.5);
+-      const results = vectorSearch(db, { embedding: query, limit: 3 });
++      const results = vectorSearch(db, { embedding: query, query: "", limit: 3 });
+ 
+       if (results.length > 0) {
+         expect(typeof results[0].has_more_before).toBe("boolean");
+@@ -378,7 +378,7 @@ describe("Database", () => {
+ 
+     it("includes turn_range string", () => {
+       const query = new Float32Array(384).fill(0.9);
+-      const results = vectorSearch(db, { embedding: query, limit: 3 });
++      const results = vectorSearch(db, { embedding: query, query: "", limit: 3 });
+ 
+       if (results.length > 0) {
+         expect(typeof results[0].turn_range).toBe("string");
+-- 
+2.34.1
+
+
+From 611c001d141f9da20451e70c27c91699500060e6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:46:24 +0900
+Subject: [PATCH 07/10] feat(todo): add 6 todo tool handlers
+
+---
+ src/tools/todo-add.ts      | 34 +++++++++++++++++++++++++++
+ src/tools/todo-archive.ts  | 23 +++++++++++++++++++
+ src/tools/todo-complete.ts | 23 +++++++++++++++++++
+ src/tools/todo-list.ts     | 38 ++++++++++++++++++++++++++++++
+ src/tools/todo-search.ts   | 47 ++++++++++++++++++++++++++++++++++++++
+ src/tools/todo-update.ts   | 42 ++++++++++++++++++++++++++++++++++
+ 6 files changed, 207 insertions(+)
+ create mode 100644 src/tools/todo-add.ts
+ create mode 100644 src/tools/todo-archive.ts
+ create mode 100644 src/tools/todo-complete.ts
+ create mode 100644 src/tools/todo-list.ts
+ create mode 100644 src/tools/todo-search.ts
+ create mode 100644 src/tools/todo-update.ts
+
+diff --git a/src/tools/todo-add.ts b/src/tools/todo-add.ts
+new file mode 100644
+index 0000000..248f8bf
+--- /dev/null
++++ b/src/tools/todo-add.ts
+@@ -0,0 +1,34 @@
++import type Database from "better-sqlite3";
++import { getEmbedder } from "../embedder/index.js";
++import { insertTodo } from "../db/todo-queries.js";
++import { toolResult, toolError } from "./helpers.js";
++
++export interface AddTodoParams {
++  title: string;
++  note?: string;
++  priority?: string;
++  tags?: string[];
++}
++
++export async function handleAddTodo(
++  db: Database.Database,
++  params: AddTodoParams
++): Promise<{ content: Array<{ type: string; text: string }> }> {
++  if (!params.title?.trim()) {
++    return toolError("title은 필수입니다");
++  }
++
++  const embedder = await getEmbedder();
++  const text = [params.title, params.note].filter(Boolean).join(" ");
++  const embedding = await embedder.embed("passage: " + text);
++
++  const uuid = insertTodo(db, {
++    title: params.title.trim(),
++    note: params.note,
++    priority: params.priority,
++    tags: params.tags,
++    embedding,
++  });
++
++  return toolResult({ status: "ok", uuid, title: params.title.trim() });
++}
+diff --git a/src/tools/todo-archive.ts b/src/tools/todo-archive.ts
+new file mode 100644
+index 0000000..b0c2529
+--- /dev/null
++++ b/src/tools/todo-archive.ts
+@@ -0,0 +1,23 @@
++import type Database from "better-sqlite3";
++import { archiveTodo } from "../db/todo-queries.js";
++import { toolResult, toolError } from "./helpers.js";
++
++export async function handleArchiveTodo(
++  db: Database.Database,
++  params: { uuid: string }
++): Promise<{ content: Array<{ type: string; text: string }> }> {
++  if (!params.uuid) return toolError("uuid는 필수입니다");
++
++  const result = archiveTodo(db, params.uuid);
++  if (!result) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
++
++  return toolResult({
++    status: "ok",
++    todo: {
++      uuid: result.uuid,
++      title: result.title,
++      status: result.status,
++      archived_at: result.archived_at,
++    },
++  });
++}
+diff --git a/src/tools/todo-complete.ts b/src/tools/todo-complete.ts
+new file mode 100644
+index 0000000..dffe743
+--- /dev/null
++++ b/src/tools/todo-complete.ts
+@@ -0,0 +1,23 @@
++import type Database from "better-sqlite3";
++import { completeTodo } from "../db/todo-queries.js";
++import { toolResult, toolError } from "./helpers.js";
++
++export async function handleCompleteTodo(
++  db: Database.Database,
++  params: { uuid: string }
++): Promise<{ content: Array<{ type: string; text: string }> }> {
++  if (!params.uuid) return toolError("uuid는 필수입니다");
++
++  const result = completeTodo(db, params.uuid);
++  if (!result) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
++
++  return toolResult({
++    status: "ok",
++    todo: {
++      uuid: result.uuid,
++      title: result.title,
++      status: result.status,
++      completed_at: result.completed_at,
++    },
++  });
++}
+diff --git a/src/tools/todo-list.ts b/src/tools/todo-list.ts
+new file mode 100644
+index 0000000..5b89d1a
+--- /dev/null
++++ b/src/tools/todo-list.ts
+@@ -0,0 +1,38 @@
++import type Database from "better-sqlite3";
++import { listTodos } from "../db/todo-queries.js";
++import { toolResult } from "./helpers.js";
++
++export interface ListTodosParams {
++  status?: string;
++  priority?: string;
++  includeArchived?: boolean;
++  limit?: number;
++}
++
++export async function handleListTodos(
++  db: Database.Database,
++  params: ListTodosParams
++): Promise<{ content: Array<{ type: string; text: string }> }> {
++  const todos = listTodos(db, {
++    status: params.status,
++    priority: params.priority,
++    includeArchived: params.includeArchived,
++    limit: params.limit,
++  });
++
++  return toolResult({
++    status: "ok",
++    count: todos.length,
++    todos: todos.map((t) => ({
++      uuid: t.uuid,
++      title: t.title,
++      note: t.note,
++      status: t.status,
++      priority: t.priority,
++      tags: JSON.parse(t.tags) as string[],
++      created_at: t.created_at,
++      completed_at: t.completed_at,
++      archived_at: t.archived_at,
++    })),
++  });
++}
+diff --git a/src/tools/todo-search.ts b/src/tools/todo-search.ts
+new file mode 100644
+index 0000000..ccacc02
+--- /dev/null
++++ b/src/tools/todo-search.ts
+@@ -0,0 +1,47 @@
++import type Database from "better-sqlite3";
++import { getEmbedder } from "../embedder/index.js";
++import { todoHybridSearch } from "../db/todo-queries.js";
++import { toolResult, toolError } from "./helpers.js";
++
++export interface SearchTodosParams {
++  query: string;
++  status?: string;
++  includeArchived?: boolean;
++  limit?: number;
++}
++
++export async function handleSearchTodos(
++  db: Database.Database,
++  params: SearchTodosParams
++): Promise<{ content: Array<{ type: string; text: string }> }> {
++  if (!params.query?.trim()) return toolError("query는 필수입니다");
++
++  const limit = Math.min(params.limit ?? 10, 50);
++  const embedder = await getEmbedder();
++  const embedding = await embedder.embed("query: " + params.query.trim());
++
++  const results = todoHybridSearch(db, {
++    embedding,
++    query: params.query,
++    limit,
++    status: params.status,
++    includeArchived: params.includeArchived,
++  });
++
++  return toolResult({
++    status: "ok",
++    query: params.query,
++    result_count: results.length,
++    results: results.map((t) => ({
++      uuid: t.uuid,
++      score: t.score,
++      title: t.title,
++      note: t.note,
++      status: t.status,
++      priority: t.priority,
++      tags: JSON.parse(t.tags) as string[],
++      created_at: t.created_at,
++      completed_at: t.completed_at,
++    })),
++  });
++}
+diff --git a/src/tools/todo-update.ts b/src/tools/todo-update.ts
+new file mode 100644
+index 0000000..6ca2aca
+--- /dev/null
++++ b/src/tools/todo-update.ts
+@@ -0,0 +1,42 @@
++import type Database from "better-sqlite3";
++import { getEmbedder } from "../embedder/index.js";
++import { updateTodo, getTodoByUuid } from "../db/todo-queries.js";
++import { toolResult, toolError } from "./helpers.js";
++
++export interface UpdateTodoParams {
++  uuid: string;
++  title?: string;
++  note?: string | null;
++  status?: string;
++  priority?: string;
++  tags?: string[];
++}
++
++export async function handleUpdateTodo(
++  db: Database.Database,
++  params: UpdateTodoParams
++): Promise<{ content: Array<{ type: string; text: string }> }> {
++  if (!params.uuid) return toolError("uuid는 필수입니다");
++
++  const existing = getTodoByUuid(db, params.uuid);
++  if (!existing) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
++
++  const embedder = await getEmbedder();
++  const newTitle = params.title ?? existing.title;
++  const newNote = params.note !== undefined ? params.note : existing.note;
++  const text = [newTitle, newNote].filter(Boolean).join(" ");
++  const embedding = await embedder.embed("passage: " + text);
++
++  const updated = updateTodo(db, { ...params, embedding });
++  if (!updated) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
++
++  return toolResult({ status: "ok", todo: {
++    uuid: updated.uuid,
++    title: updated.title,
++    note: updated.note,
++    status: updated.status,
++    priority: updated.priority,
++    tags: JSON.parse(updated.tags) as string[],
++    updated_at: updated.updated_at,
++  }});
++}
+-- 
+2.34.1
+
+
+From 6cdd980426776f0d38bc8200c411307720884236 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:49:08 +0900
+Subject: [PATCH 08/10] fix(todo): fix brace formatting and uuid guard
+ consistency
+
+---
+ src/tools/todo-archive.ts  |  2 +-
+ src/tools/todo-complete.ts |  2 +-
+ src/tools/todo-update.ts   | 23 +++++++++++++----------
+ 3 files changed, 15 insertions(+), 12 deletions(-)
+
+diff --git a/src/tools/todo-archive.ts b/src/tools/todo-archive.ts
+index b0c2529..9711442 100644
+--- a/src/tools/todo-archive.ts
++++ b/src/tools/todo-archive.ts
+@@ -6,7 +6,7 @@ export async function handleArchiveTodo(
+   db: Database.Database,
+   params: { uuid: string }
+ ): Promise<{ content: Array<{ type: string; text: string }> }> {
+-  if (!params.uuid) return toolError("uuid는 필수입니다");
++  if (!params.uuid?.trim()) return toolError("uuid는 필수입니다");
+ 
+   const result = archiveTodo(db, params.uuid);
+   if (!result) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
+diff --git a/src/tools/todo-complete.ts b/src/tools/todo-complete.ts
+index dffe743..c27c48a 100644
+--- a/src/tools/todo-complete.ts
++++ b/src/tools/todo-complete.ts
+@@ -6,7 +6,7 @@ export async function handleCompleteTodo(
+   db: Database.Database,
+   params: { uuid: string }
+ ): Promise<{ content: Array<{ type: string; text: string }> }> {
+-  if (!params.uuid) return toolError("uuid는 필수입니다");
++  if (!params.uuid?.trim()) return toolError("uuid는 필수입니다");
+ 
+   const result = completeTodo(db, params.uuid);
+   if (!result) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
+diff --git a/src/tools/todo-update.ts b/src/tools/todo-update.ts
+index 6ca2aca..a11254d 100644
+--- a/src/tools/todo-update.ts
++++ b/src/tools/todo-update.ts
+@@ -16,7 +16,7 @@ export async function handleUpdateTodo(
+   db: Database.Database,
+   params: UpdateTodoParams
+ ): Promise<{ content: Array<{ type: string; text: string }> }> {
+-  if (!params.uuid) return toolError("uuid는 필수입니다");
++  if (!params.uuid?.trim()) return toolError("uuid는 필수입니다");
+ 
+   const existing = getTodoByUuid(db, params.uuid);
+   if (!existing) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
+@@ -30,13 +30,16 @@ export async function handleUpdateTodo(
+   const updated = updateTodo(db, { ...params, embedding });
+   if (!updated) return toolError(`uuid '${params.uuid}'를 찾을 수 없습니다`);
+ 
+-  return toolResult({ status: "ok", todo: {
+-    uuid: updated.uuid,
+-    title: updated.title,
+-    note: updated.note,
+-    status: updated.status,
+-    priority: updated.priority,
+-    tags: JSON.parse(updated.tags) as string[],
+-    updated_at: updated.updated_at,
+-  }});
++  return toolResult({
++    status: "ok",
++    todo: {
++      uuid: updated.uuid,
++      title: updated.title,
++      note: updated.note,
++      status: updated.status,
++      priority: updated.priority,
++      tags: JSON.parse(updated.tags) as string[],
++      updated_at: updated.updated_at,
++    },
++  });
+ }
+-- 
+2.34.1
+
+
+From 4bba3a5f7b1af9da97a45d24002df7a8562182d6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:51:17 +0900
+Subject: [PATCH 09/10] feat(todo): register 6 todo MCP tools in server
+
+---
+ src/server.ts | 76 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 76 insertions(+)
+
+diff --git a/src/server.ts b/src/server.ts
+index f71a22b..073b682 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -9,6 +9,12 @@ import { handleIndex } from "./tools/index-tool.js";
+ import { handleListSessions } from "./tools/list-sessions.js";
+ import { handleStatus } from "./tools/status.js";
+ import { handleManageProjects } from "./tools/manage-projects.js";
++import { handleAddTodo } from "./tools/todo-add.js";
++import { handleListTodos } from "./tools/todo-list.js";
++import { handleUpdateTodo } from "./tools/todo-update.js";
++import { handleCompleteTodo } from "./tools/todo-complete.js";
++import { handleArchiveTodo } from "./tools/todo-archive.js";
++import { handleSearchTodos } from "./tools/todo-search.js";
+ 
+ // eslint-disable-next-line @typescript-eslint/no-explicit-any
+ type ToolResult = any;
+@@ -124,6 +130,76 @@ export async function startServer(): Promise<void> {
+     }
+   );
+ 
++  // add_todo tool
++  server.tool(
++    "add_todo",
++    "사용자의 할일을 추가한다. 제목(title)은 필수. note, priority(low/medium/high/urgent), tags 옵션.",
++    {
++      title:    z.string(),
++      note:     z.string().optional(),
++      priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
++      tags:     z.array(z.string()).optional(),
++    },
++    async (args): Promise<ToolResult> => handleAddTodo(db, args)
++  );
++
++  // list_todos tool
++  server.tool(
++    "list_todos",
++    "사용자의 할일 목록을 조회한다. 기본값: 미완료(todo/in_progress)만 반환. status='all'이면 완료 포함. includeArchived=true면 삭제된 항목도 포함.",
++    {
++      status:          z.enum(["todo", "in_progress", "done", "cancelled", "all"]).optional(),
++      priority:        z.enum(["low", "medium", "high", "urgent"]).optional(),
++      includeArchived: z.boolean().optional(),
++      limit:           z.number().optional(),
++    },
++    async (args): Promise<ToolResult> => handleListTodos(db, args)
++  );
++
++  // update_todo tool
++  server.tool(
++    "update_todo",
++    "할일을 수정한다. uuid는 필수. title, note(null이면 삭제), status, priority, tags 중 변경할 항목만 전달.",
++    {
++      uuid:     z.string(),
++      title:    z.string().optional(),
++      note:     z.string().nullable().optional(),
++      status:   z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
++      priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
++      tags:     z.array(z.string()).optional(),
++    },
++    async (args): Promise<ToolResult> => handleUpdateTodo(db, args)
++  );
++
++  // complete_todo tool
++  server.tool(
++    "complete_todo",
++    "할일을 완료 처리한다(status=done). 이미 완료된 경우 completed_at을 보존한 채 그대로 반환한다.",
++    { uuid: z.string() },
++    async (args): Promise<ToolResult> => handleCompleteTodo(db, args)
++  );
++
++  // archive_todo tool
++  server.tool(
++    "archive_todo",
++    "할일을 아카이브(soft delete) 처리한다. 데이터는 삭제되지 않고 기본 조회에서만 숨겨진다. list_todos(includeArchived=true)로 확인 가능.",
++    { uuid: z.string() },
++    async (args): Promise<ToolResult> => handleArchiveTodo(db, args)
++  );
++
++  // search_todos tool
++  server.tool(
++    "search_todos",
++    "할일을 의미론적으로 검색한다(Hybrid: Vector+FTS5+RRF). lore의 대화 검색(search tool)과 완전히 분리된다.",
++    {
++      query:           z.string(),
++      status:          z.enum(["todo", "in_progress", "done", "cancelled", "all"]).optional(),
++      includeArchived: z.boolean().optional(),
++      limit:           z.number().optional(),
++    },
++    async (args): Promise<ToolResult> => handleSearchTodos(db, args)
++  );
++
+   const transport = new StdioServerTransport();
+   await server.connect(transport);
+ }
+-- 
+2.34.1
+
+
+From 80d197df7af3adb443870f98c91e5210deb68bb7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=EC=9E=84=ED=98=84=EC=9E=AC=20=EC=97=B0=EA=B5=AC=EC=9B=90/?=
+ =?UTF-8?q?=EC=97=B0=EA=B5=AC=EA=B0=9C=EB=B0=9CAI=ED=8C=80?=
+ <hyunjae.lim@hyundai.com>
+Date: Fri, 27 Mar 2026 12:54:33 +0900
+Subject: [PATCH 10/10] fix(todo): fix missing tool registrations and update to
+ non-deprecated MCP SDK API
+
+---
+ src/server.ts | 148 +++++++++++++++++++++++++++++---------------------
+ 1 file changed, 86 insertions(+), 62 deletions(-)
+
+diff --git a/src/server.ts b/src/server.ts
+index 073b682..a56cd79 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -28,17 +28,19 @@ export async function startServer(): Promise<void> {
+   });
+ 
+   // search tool
+-  server.tool(
++  server.registerTool(
+     "search",
+-    "Search through past Claude Code conversations across all projects. Use when the user asks about previous discussions, past decisions, or anything from a prior conversation.",
+     {
+-      query: z.string(),
+-      project: z.string().optional(),
+-      session: z.string().optional().describe("Filter by session ID (UUID). Use list_sessions to find session IDs."),
+-      branch: z.string().optional(),
+-      after: z.string().optional(),
+-      before: z.string().optional(),
+-      limit: z.number().optional(),
++      description: "Search through past Claude Code conversations across all projects. Use when the user asks about previous discussions, past decisions, or anything from a prior conversation.",
++      inputSchema: {
++        query: z.string(),
++        project: z.string().optional(),
++        session: z.string().optional().describe("Filter by session ID (UUID). Use list_sessions to find session IDs."),
++        branch: z.string().optional(),
++        after: z.string().optional(),
++        before: z.string().optional(),
++        limit: z.number().optional(),
++      },
+     },
+     async (args): Promise<ToolResult> => {
+       return handleSearch(db, {
+@@ -54,13 +56,15 @@ export async function startServer(): Promise<void> {
+   );
+ 
+   // get_context tool
+-  server.tool(
++  server.registerTool(
+     "get_context",
+-    "Retrieve more conversation context around a specific search result. Use ONLY after calling search, when you need to see what was discussed before or after a result.",
+     {
+-      chunk_id: z.number(),
+-      direction: z.enum(["before", "after", "both"]).optional(),
+-      count: z.number().optional(),
++      description: "Retrieve more conversation context around a specific search result. Use ONLY after calling search, when you need to see what was discussed before or after a result.",
++      inputSchema: {
++        chunk_id: z.number(),
++        direction: z.enum(["before", "after", "both"]).optional(),
++        count: z.number().optional(),
++      },
+     },
+     async (args): Promise<ToolResult> => {
+       return handleGetContext(db, {
+@@ -71,12 +75,15 @@ export async function startServer(): Promise<void> {
+     }
+   );
+ 
+-  server.tool(
++  // index tool
++  server.registerTool(
+     "index",
+-    "Index Claude Code sessions for search. No params = index all non-excluded projects. Pass 'project' with a path to index a specific project (even if excluded).",
+     {
+-      mode: z.enum(["rebuild", "cancel"]).optional().describe("rebuild: deletes ALL indexed data and re-indexes from scratch. cancel: stop running index."),
+-      project: z.string().optional().describe("Project path (e.g., '/Users/me/my-app') or dir_name to index a specific project."),
++      description: "Index Claude Code sessions for search. No params = index all non-excluded projects. Pass 'project' with a path to index a specific project (even if excluded).",
++      inputSchema: {
++        mode: z.enum(["rebuild", "cancel"]).optional().describe("rebuild: deletes ALL indexed data and re-indexes from scratch. cancel: stop running index."),
++        project: z.string().optional().describe("Project path (e.g., '/Users/me/my-app') or dir_name to index a specific project."),
++      },
+     },
+     async (args): Promise<ToolResult> => {
+       return handleIndex(db, {
+@@ -87,13 +94,15 @@ export async function startServer(): Promise<void> {
+   );
+ 
+   // list_sessions tool
+-  server.tool(
++  server.registerTool(
+     "list_sessions",
+-    "List all indexed Claude Code sessions. Use when the user wants to browse conversation history or find sessions by project/date.",
+     {
+-      project: z.string().optional(),
+-      limit: z.number().optional(),
+-      sort: z.enum(["recent", "oldest"]).optional(),
++      description: "List all indexed Claude Code sessions. Use when the user wants to browse conversation history or find sessions by project/date.",
++      inputSchema: {
++        project: z.string().optional(),
++        limit: z.number().optional(),
++        sort: z.enum(["recent", "oldest"]).optional(),
++      },
+     },
+     async (args): Promise<ToolResult> => {
+       return handleListSessions(db, {
+@@ -105,12 +114,14 @@ export async function startServer(): Promise<void> {
+   );
+ 
+   // manage_projects tool
+-  server.tool(
++  server.registerTool(
+     "manage_projects",
+-    "Manage which projects are indexed. All projects are indexed by default (opt-out model). Use 'list' to see all projects and their status. Use 'exclude' to stop indexing a project and clean up its data. Use 'include' to undo an exclusion.",
+     {
+-      action: z.enum(["exclude", "include", "list"]),
+-      projects: z.array(z.string()).optional().describe("Project paths (e.g., '/Users/me/my-app') or dir_names. Supports batch."),
++      description: "Manage which projects are indexed. All projects are indexed by default (opt-out model). Use 'list' to see all projects and their status. Use 'exclude' to stop indexing a project and clean up its data. Use 'include' to undo an exclusion.",
++      inputSchema: {
++        action: z.enum(["exclude", "include", "list"]),
++        projects: z.array(z.string()).optional().describe("Project paths (e.g., '/Users/me/my-app') or dir_names. Supports batch."),
++      },
+     },
+     async (args): Promise<ToolResult> => {
+       return handleManageProjects(db, {
+@@ -121,81 +132,94 @@ export async function startServer(): Promise<void> {
+   );
+ 
+   // status tool
+-  server.tool(
++  server.registerTool(
+     "status",
+-    "Check the health and progress of lore indexing. Shows indexing status, session counts, DB size. Use this to monitor indexing progress after calling index.",
+-    {},
++    {
++      description: "Check the health and progress of lore indexing. Shows indexing status, session counts, DB size. Use this to monitor indexing progress after calling index.",
++    },
+     async (): Promise<ToolResult> => {
+       return handleStatus(db);
+     }
+   );
+ 
+   // add_todo tool
+-  server.tool(
++  server.registerTool(
+     "add_todo",
+-    "사용자의 할일을 추가한다. 제목(title)은 필수. note, priority(low/medium/high/urgent), tags 옵션.",
+     {
+-      title:    z.string(),
+-      note:     z.string().optional(),
+-      priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+-      tags:     z.array(z.string()).optional(),
++      description: "사용자의 할일을 추가한다. 제목(title)은 필수. note, priority(low/medium/high/urgent), tags 옵션.",
++      inputSchema: {
++        title:    z.string(),
++        note:     z.string().optional(),
++        priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
++        tags:     z.array(z.string()).optional(),
++      },
+     },
+     async (args): Promise<ToolResult> => handleAddTodo(db, args)
+   );
+ 
+   // list_todos tool
+-  server.tool(
++  server.registerTool(
+     "list_todos",
+-    "사용자의 할일 목록을 조회한다. 기본값: 미완료(todo/in_progress)만 반환. status='all'이면 완료 포함. includeArchived=true면 삭제된 항목도 포함.",
+     {
+-      status:          z.enum(["todo", "in_progress", "done", "cancelled", "all"]).optional(),
+-      priority:        z.enum(["low", "medium", "high", "urgent"]).optional(),
+-      includeArchived: z.boolean().optional(),
+-      limit:           z.number().optional(),
++      description: "사용자의 할일 목록을 조회한다. 기본값: 미완료(todo/in_progress)만 반환. status='all'이면 완료 포함. includeArchived=true면 삭제된 항목도 포함.",
++      inputSchema: {
++        status:          z.enum(["todo", "in_progress", "done", "cancelled", "all"]).optional(),
++        priority:        z.enum(["low", "medium", "high", "urgent"]).optional(),
++        includeArchived: z.boolean().optional(),
++        limit:           z.number().optional(),
++      },
+     },
+     async (args): Promise<ToolResult> => handleListTodos(db, args)
+   );
+ 
+   // update_todo tool
+-  server.tool(
++  server.registerTool(
+     "update_todo",
+-    "할일을 수정한다. uuid는 필수. title, note(null이면 삭제), status, priority, tags 중 변경할 항목만 전달.",
+     {
+-      uuid:     z.string(),
+-      title:    z.string().optional(),
+-      note:     z.string().nullable().optional(),
+-      status:   z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
+-      priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+-      tags:     z.array(z.string()).optional(),
++      description: "할일을 수정한다. uuid는 필수. title, note(null이면 삭제), status, priority, tags 중 변경할 항목만 전달.",
++      inputSchema: {
++        uuid:     z.string(),
++        title:    z.string().optional(),
++        note:     z.string().nullable().optional(),
++        status:   z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
++        priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
++        tags:     z.array(z.string()).optional(),
++      },
+     },
+     async (args): Promise<ToolResult> => handleUpdateTodo(db, args)
+   );
+ 
+   // complete_todo tool
+-  server.tool(
++  server.registerTool(
+     "complete_todo",
+-    "할일을 완료 처리한다(status=done). 이미 완료된 경우 completed_at을 보존한 채 그대로 반환한다.",
+-    { uuid: z.string() },
++    {
++      description: "할일을 완료 처리한다(status=done). 이미 완료된 경우 completed_at을 보존한 채 그대로 반환한다.",
++      inputSchema: { uuid: z.string() },
++    },
+     async (args): Promise<ToolResult> => handleCompleteTodo(db, args)
+   );
+ 
+   // archive_todo tool
+-  server.tool(
++  server.registerTool(
+     "archive_todo",
+-    "할일을 아카이브(soft delete) 처리한다. 데이터는 삭제되지 않고 기본 조회에서만 숨겨진다. list_todos(includeArchived=true)로 확인 가능.",
+-    { uuid: z.string() },
++    {
++      description: "할일을 아카이브(soft delete) 처리한다. 데이터는 삭제되지 않고 기본 조회에서만 숨겨진다. list_todos(includeArchived=true)로 확인 가능.",
++      inputSchema: { uuid: z.string() },
++    },
+     async (args): Promise<ToolResult> => handleArchiveTodo(db, args)
+   );
+ 
+   // search_todos tool
+-  server.tool(
++  server.registerTool(
+     "search_todos",
+-    "할일을 의미론적으로 검색한다(Hybrid: Vector+FTS5+RRF). lore의 대화 검색(search tool)과 완전히 분리된다.",
+     {
+-      query:           z.string(),
+-      status:          z.enum(["todo", "in_progress", "done", "cancelled", "all"]).optional(),
+-      includeArchived: z.boolean().optional(),
+-      limit:           z.number().optional(),
++      description: "할일을 의미론적으로 검색한다(Hybrid: Vector+FTS5+RRF). lore의 대화 검색(search tool)과 완전히 분리된다.",
++      inputSchema: {
++        query:           z.string(),
++        status:          z.enum(["todo", "in_progress", "done", "cancelled", "all"]).optional(),
++        includeArchived: z.boolean().optional(),
++        limit:           z.number().optional(),
++      },
+     },
+     async (args): Promise<ToolResult> => handleSearchTodos(db, args)
+   );
+-- 
+2.34.1
+

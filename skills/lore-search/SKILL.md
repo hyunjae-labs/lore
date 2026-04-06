@@ -97,6 +97,16 @@ Specific (failed): "train_stacking_v2.py line 168 OOF embargo fix"
 Step-back:         "ML model training pipeline improvement"
 ```
 
+## List Sessions (`list_sessions`)
+
+Browse indexed sessions with metadata. Useful for finding a specific session before searching.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `project` | string | Filter by project |
+| `limit` | number | Max sessions to return (default 20, max 100) |
+| `sort` | "recent" / "oldest" | Sort order (default: recent) |
+
 ## Anti-Patterns
 
 | Don't | Do Instead |
