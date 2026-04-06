@@ -60,7 +60,7 @@ export function extractTextContent(type: string, message: any): string {
     } else if (block.type === "thinking" && block.thinking) {
       parts.push(block.thinking);
     } else if (block.type === "tool_use" && block.name) {
-      parts.push(`[Tool: ${block.name}]`);
+      parts.push(extractToolSummary(block));
     } else if (block.type === "tool_result") {
       // Exclude tool result content — it's noise for embeddings
       // (file dumps, command outputs dominate vectors and degrade relevance)
@@ -68,4 +68,33 @@ export function extractTextContent(type: string, message: any): string {
   }
 
   return parts.join("\n\n");
+}
+
+function extractToolSummary(block: any): string {
+  const name: string = block.name;
+  const input: Record<string, any> = block.input || {};
+
+  switch (name) {
+    case "Write":
+    case "Read":
+    case "Edit":
+      return `[Tool: ${name} → ${input.file_path || ""}]`;
+
+    case "Bash": {
+      const cmd = String(input.command || "").split("\n")[0].slice(0, 100);
+      return `[Tool: Bash → ${cmd}]`;
+    }
+
+    case "Glob":
+      return `[Tool: Glob → ${input.pattern || ""} in ${input.path || "."}]`;
+
+    case "Grep":
+      return `[Tool: Grep → "${input.pattern || ""}" in ${input.path || "."}]`;
+
+    case "Agent":
+      return `[Tool: Agent → ${input.description || input.subagent_type || ""}]`;
+
+    default:
+      return `[Tool: ${name}]`;
+  }
 }

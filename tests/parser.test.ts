@@ -38,7 +38,7 @@ describe("parseLine", () => {
     expect(result!.type).toBe("assistant");
     expect(result!.text).toContain("Let me analyze...");
     expect(result!.text).toContain("Here's the fix for auth.");
-    expect(result!.text).toContain("[Tool: Edit]");
+    expect(result!.text).toContain("[Tool: Edit → src/auth.ts]");
     expect(result!.model).toBe("claude-opus-4-6");
   });
 
