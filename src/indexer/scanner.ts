@@ -84,14 +84,30 @@ export function needsReindex(
   return "skip";
 }
 
-/** Read the first line of a Codex session file and extract cwd from session_meta. */
+/**
+ * Read the first line of a Codex session file and extract cwd from session_meta.
+ * Reads in 16KB chunks until a newline is found (Codex `instructions` field can
+ * push the first line past 25KB). Hard limit 1MB to bound runaway files.
+ */
 export function extractCodexCwd(filePath: string): string | null {
+  const CHUNK = 16384;
+  const MAX_BYTES = 1024 * 1024;
+  let fd: number | null = null;
   try {
-    const fd = openSync(filePath, "r");
-    const buf = Buffer.alloc(8192);
-    const n = readSync(fd, buf, 0, 8192, 0);
-    closeSync(fd);
-    const firstLine = buf.slice(0, n).toString("utf-8").split("\n")[0];
+    fd = openSync(filePath, "r");
+    let collected = Buffer.alloc(0);
+    let pos = 0;
+    let newlineIdx = -1;
+    while (newlineIdx === -1 && collected.length < MAX_BYTES) {
+      const chunk = Buffer.alloc(CHUNK);
+      const n = readSync(fd, chunk, 0, CHUNK, pos);
+      if (n === 0) break;
+      collected = Buffer.concat([collected, chunk.subarray(0, n)]);
+      newlineIdx = collected.indexOf(0x0a);
+      pos += n;
+    }
+    const firstLineBuf = newlineIdx === -1 ? collected : collected.subarray(0, newlineIdx);
+    const firstLine = firstLineBuf.toString("utf-8");
     if (!firstLine) return null;
     const obj = JSON.parse(firstLine);
     if (obj?.type === "session_meta") {
@@ -100,6 +116,10 @@ export function extractCodexCwd(filePath: string): string | null {
     return null;
   } catch {
     return null;
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
   }
 }
 

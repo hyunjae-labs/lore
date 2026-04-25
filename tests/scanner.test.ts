@@ -207,6 +207,17 @@ describe("extractCodexCwd", () => {
     writeFileSync(file, "");
     expect(extractCodexCwd(file)).toBeNull();
   });
+
+  it("handles first line larger than 8KB (real Codex instructions field)", () => {
+    const file = join(tempDir, "rollout-big-meta.jsonl");
+    const longInstructions = "x".repeat(30000);
+    writeFileSync(file, JSON.stringify({
+      timestamp: "2026-01-01T00:00:00Z",
+      type: "session_meta",
+      payload: { id: "abc", cwd: "/Users/test/biggie", instructions: longInstructions },
+    }) + "\n");
+    expect(extractCodexCwd(file)).toBe("/Users/test/biggie");
+  });
 });
 
 describe("scanCodexProjectsAndSessions", () => {
