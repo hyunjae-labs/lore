@@ -1,6 +1,7 @@
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync, openSync, closeSync, readSync } from "node:fs";
 import { join, basename } from "node:path";
 import { CONFIG } from "../config.js";
+import { pathToDirName } from "../utils/path.js";
 
 export interface ProjectInfo {
   dirName: string;        // e.g., "-Users-username-01-projects-my-webapp"
@@ -13,6 +14,7 @@ export interface SessionInfo {
   jsonlPath: string;      // full path to .jsonl file
   size: number;           // file size in bytes
   mtime: number;          // modification time (ms since epoch)
+  format?: "claude" | "codex";  // undefined means "claude" (backward compat)
 }
 
 export function scanProjects(baseDir?: string): ProjectInfo[] {
@@ -80,4 +82,95 @@ export function needsReindex(
   }
 
   return "skip";
+}
+
+/** Read the first line of a Codex session file and extract cwd from session_meta. */
+export function extractCodexCwd(filePath: string): string | null {
+  try {
+    const fd = openSync(filePath, "r");
+    const buf = Buffer.alloc(8192);
+    const n = readSync(fd, buf, 0, 8192, 0);
+    closeSync(fd);
+    const firstLine = buf.slice(0, n).toString("utf-8").split("\n")[0];
+    if (!firstLine) return null;
+    const obj = JSON.parse(firstLine);
+    if (obj?.type === "session_meta") {
+      return obj?.payload?.cwd || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Recursively find all rollout-*.jsonl files under dir. */
+function findCodexFiles(dir: string): string[] {
+  const results: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry);
+    try {
+      const s = statSync(full);
+      if (s.isDirectory()) {
+        results.push(...findCodexFiles(full));
+      } else if (entry.startsWith("rollout-") && entry.endsWith(".jsonl")) {
+        results.push(full);
+      }
+    } catch { /* ignore */ }
+  }
+  return results;
+}
+
+/**
+ * Scan ~/.codex/sessions, group sessions by cwd into virtual ProjectInfo entries.
+ * dirName = "codex-" + pathToDirName(cwd)
+ */
+export function scanCodexProjectsAndSessions(codexSessionsDir: string): Array<{
+  project: ProjectInfo;
+  sessions: SessionInfo[];
+}> {
+  const files = findCodexFiles(codexSessionsDir);
+  if (files.length === 0) return [];
+
+  const byCwd = new Map<string, string[]>();
+  for (const filePath of files) {
+    const cwd = extractCodexCwd(filePath) ?? "__unknown__";
+    if (!byCwd.has(cwd)) byCwd.set(cwd, []);
+    byCwd.get(cwd)!.push(filePath);
+  }
+
+  return Array.from(byCwd.entries()).map(([cwd, filePaths]) => {
+    const dirName = "codex-" + pathToDirName(cwd);
+    const virtualPath = join(codexSessionsDir, dirName);
+
+    const project: ProjectInfo = {
+      dirName,
+      dirPath: virtualPath,
+      name: virtualPath,
+    };
+
+    const sessions: SessionInfo[] = filePaths
+      .map((filePath): SessionInfo | null => {
+        try {
+          const s = statSync(filePath);
+          return {
+            sessionId: basename(filePath, ".jsonl"),
+            jsonlPath: filePath,
+            size: s.size,
+            mtime: s.mtimeMs,
+            format: "codex" as const,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((s): s is SessionInfo => s !== null);
+
+    return { project, sessions };
+  });
 }

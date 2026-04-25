@@ -6,6 +6,8 @@ import {
   scanProjects,
   scanSessions,
   needsReindex,
+  extractCodexCwd,
+  scanCodexProjectsAndSessions,
 } from "../src/indexer/scanner.js";
 import { CONFIG } from "../src/config.js";
 
@@ -180,5 +182,93 @@ describe("needsReindex", () => {
     const session = makeSession(1000, base);
     // mtime differs by 500ms — within tolerance
     expect(needsReindex(session, 1000, base - 500, 500)).toBe("skip");
+  });
+});
+
+describe("extractCodexCwd", () => {
+  it("returns cwd from session_meta first line", () => {
+    const file = join(tempDir, "rollout-2026-01-01T00-00-00-abc.jsonl");
+    writeFileSync(file, JSON.stringify({
+      timestamp: "2026-01-01T00:00:00Z",
+      type: "session_meta",
+      payload: { id: "abc", cwd: "/Users/test/myproject" },
+    }) + "\n");
+    expect(extractCodexCwd(file)).toBe("/Users/test/myproject");
+  });
+
+  it("returns null when session_meta is missing", () => {
+    const file = join(tempDir, "rollout-no-meta.jsonl");
+    writeFileSync(file, JSON.stringify({ type: "response_item", payload: {} }) + "\n");
+    expect(extractCodexCwd(file)).toBeNull();
+  });
+
+  it("returns null for empty file", () => {
+    const file = join(tempDir, "rollout-empty.jsonl");
+    writeFileSync(file, "");
+    expect(extractCodexCwd(file)).toBeNull();
+  });
+});
+
+describe("scanCodexProjectsAndSessions", () => {
+  function makeCodexSession(dir: string, filename: string, cwd: string): void {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, filename), JSON.stringify({
+      timestamp: "2026-01-01T00:00:00Z",
+      type: "session_meta",
+      payload: { id: "abc", cwd },
+    }) + "\n" + JSON.stringify({
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] },
+    }) + "\n");
+  }
+
+  it("groups sessions by cwd into virtual projects", () => {
+    makeCodexSession(
+      join(tempDir, "2026", "01", "01"),
+      "rollout-2026-01-01T00-00-00-aaa-bbb-ccc-ddd-eee.jsonl",
+      "/Users/test/project-a"
+    );
+    makeCodexSession(
+      join(tempDir, "2026", "01", "02"),
+      "rollout-2026-01-02T00-00-00-fff-ggg-hhh-iii-jjj.jsonl",
+      "/Users/test/project-a"
+    );
+    makeCodexSession(
+      join(tempDir, "2026", "01", "03"),
+      "rollout-2026-01-03T00-00-00-kkk-lll-mmm-nnn-ooo.jsonl",
+      "/Users/test/project-b"
+    );
+
+    const result = scanCodexProjectsAndSessions(tempDir);
+    expect(result).toHaveLength(2);
+
+    const projectA = result.find((r) => r.project.dirName.includes("project-a"));
+    expect(projectA).toBeDefined();
+    expect(projectA!.sessions).toHaveLength(2);
+    expect(projectA!.project.dirName).toBe("codex--Users-test-project-a");
+    expect(projectA!.sessions[0].format).toBe("codex");
+
+    const projectB = result.find((r) => r.project.dirName.includes("project-b"));
+    expect(projectB).toBeDefined();
+    expect(projectB!.sessions).toHaveLength(1);
+  });
+
+  it("returns empty array when directory does not exist", () => {
+    const result = scanCodexProjectsAndSessions("/nonexistent/path");
+    expect(result).toHaveLength(0);
+  });
+
+  it("sessionId is full rollout filename without .jsonl", () => {
+    makeCodexSession(
+      join(tempDir, "2026", "02", "01"),
+      "rollout-2026-02-01T12-00-00-aaa-bbb-ccc-ddd-eee.jsonl",
+      "/Users/test/project-c"
+    );
+    const result = scanCodexProjectsAndSessions(tempDir);
+    const projC = result.find((r) => r.project.dirName.includes("project-c"));
+    expect(projC!.sessions[0].sessionId).toBe(
+      "rollout-2026-02-01T12-00-00-aaa-bbb-ccc-ddd-eee"
+    );
   });
 });
