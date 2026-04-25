@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { loadUserConfig, saveUserConfig, CONFIG } from "../config.js";
-import { scanProjects, scanSessions } from "../indexer/scanner.js";
+import { scanProjects, scanSessions, scanCodexProjectsAndSessions } from "../indexer/scanner.js";
 import { deleteProjectData } from "../db/queries.js";
 import { getIndexProgress } from "./index-tool.js";
 import { toolResult, toolError } from "./helpers.js";
@@ -57,7 +57,7 @@ export async function handleManageProjects(
   const excludedSet = new Set(config.excluded_projects);
 
   if (params.action === "list") {
-    const projectList = allProjects.map((p) => {
+    const claudeList = allProjects.map((p) => {
       const sessions = scanSessions(p.dirPath);
       const isExcluded = excludedSet.has(p.dirName);
       return {
@@ -67,6 +67,17 @@ export async function handleManageProjects(
         excluded: isExcluded,
       };
     });
+
+    // Include Codex virtual projects in the list
+    const codexProjectSessions = scanCodexProjectsAndSessions(CONFIG.codexSessionsDir);
+    const codexList = codexProjectSessions.map(({ project, sessions }) => ({
+      dir_name: project.dirName,
+      name: project.name,
+      session_count: sessions.length,
+      excluded: excludedSet.has(project.dirName),
+    }));
+
+    const projectList = [...claudeList, ...codexList];
 
     projectList.sort((a, b) => {
       if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;

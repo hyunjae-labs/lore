@@ -48,6 +48,9 @@ beforeEach(() => {
 
   process.env.CLAUDE_PROJECTS_DIR = projectsDir;
   process.env.LORE_DIR = loreDir;
+  // Point CODEX_SESSIONS_DIR at an empty dir so real ~/.codex/sessions don't leak in
+  process.env.CODEX_SESSIONS_DIR = join(tempDir, "codex-empty");
+  mkdirSync(join(tempDir, "codex-empty"), { recursive: true });
 
   // Reset config each test
   saveUserConfig({ excluded_projects: [] });
@@ -57,6 +60,7 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
   delete process.env.CLAUDE_PROJECTS_DIR;
   delete process.env.LORE_DIR;
+  delete process.env.CODEX_SESSIONS_DIR;
 });
 
 describe("manage_projects", () => {
@@ -230,6 +234,29 @@ describe("manage_projects", () => {
     const config = loadUserConfig();
     expect(config.excluded_projects).toContain("-Users-test-alpha");
     expect(config.excluded_projects).not.toContain("-Users-test-alpha-extra");
+    db.close();
+  });
+
+  it("list includes codex projects when CODEX_SESSIONS_DIR is set", async () => {
+    const codexDir = join(tempDir, "codex-sessions");
+    mkdirSync(join(codexDir, "2026", "01", "01"), { recursive: true });
+    writeFileSync(
+      join(codexDir, "2026", "01", "01", "rollout-2026-01-01T00-00-00-aaa-bbb-ccc-ddd-eee.jsonl"),
+      JSON.stringify({ type: "session_meta", payload: { id: "x", cwd: "/Users/test/myproject" } }) + "\n"
+    );
+
+    process.env.CODEX_SESSIONS_DIR = codexDir;
+    process.env.CLAUDE_PROJECTS_DIR = join(tempDir, "claude-empty");
+    mkdirSync(join(tempDir, "claude-empty"), { recursive: true });
+
+    const db = makeDb();
+    const result = await handleManageProjects(db, { action: "list" });
+    const parsed = JSON.parse(result.content[0].text);
+
+    expect(parsed.projects.some((p: any) => p.dir_name?.includes("codex-"))).toBe(true);
+
+    delete process.env.CODEX_SESSIONS_DIR;
+    delete process.env.CLAUDE_PROJECTS_DIR;
     db.close();
   });
 });
