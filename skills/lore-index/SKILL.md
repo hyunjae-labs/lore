@@ -7,6 +7,12 @@ description: Manage lore indexing and project exclusions. MUST invoke this skill
 
 Lore uses an **opt-out (blacklist) model**: ALL projects are indexed by default. Users can exclude specific projects they don't want indexed.
 
+**Two source agents are indexed in the same DB:**
+- **Claude Code** sessions from `~/.claude/projects/` (override with `CLAUDE_PROJECTS_DIR`)
+- **OpenAI Codex CLI** sessions from `~/.codex/sessions/` (override with `CODEX_SESSIONS_DIR`)
+
+Codex sessions are grouped by `cwd` (read from each file's `session_meta` line) and surfaced as virtual projects with a `codex-` `dirName` prefix. The same project working directory may appear twice in the list — once as a Claude Code project (no prefix) and once as a Codex project (`codex-` prefix). They are independent rows; excluding one does not affect the other.
+
 ## First-Time Setup
 
 If the user has never used lore indexing before, or asks to index without context, walk them through:

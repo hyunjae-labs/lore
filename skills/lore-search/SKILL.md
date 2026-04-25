@@ -1,11 +1,17 @@
 ---
 name: lore-search
-description: Search past Claude Code conversations using lore MCP. MUST invoke this skill before calling mcp__lore__search — it guides you to clarify the user's intent and formulate effective queries. Trigger when the user asks to find past work, recall previous sessions, or search conversation history. Trigger on phrases like "last time we", "how did we solve", "check previous sessions", "find in history", "did we ever", "remember when", or any reference to past conversations, prior decisions, or previous work sessions. Also trigger on Korean equivalents like references to past work or prior sessions. NOT for git log, reading current files, web search, Notion, or GitHub.
+description: Search past Claude Code and OpenAI Codex CLI conversations using lore MCP. MUST invoke this skill before calling mcp__lore__search — it guides you to clarify the user's intent and formulate effective queries. Trigger when the user asks to find past work, recall previous sessions, or search conversation history. Trigger on phrases like "last time we", "how did we solve", "check previous sessions", "find in history", "did we ever", "remember when", or any reference to past conversations, prior decisions, or previous work sessions. Also trigger on Korean equivalents like references to past work or prior sessions. NOT for git log, reading current files, web search, Notion, or GitHub.
 ---
 
 # Lore Search
 
-You're searching a hybrid BM25 + semantic index of past Claude Code conversation turns. The index contains multilingual content organized as session chunks with metadata (project, branch, timestamp, model, intent).
+You're searching a hybrid BM25 + semantic index of past Claude Code and OpenAI Codex CLI conversation turns. The index contains multilingual content organized as session chunks with metadata (project, branch, timestamp, model, intent).
+
+Projects come from two sources:
+- **Claude Code:** dirName like `-Users-foo-01-projects-my-app` (mirrors `~/.claude/projects/`)
+- **Codex CLI:** dirName like `codex--Users-foo-01-projects-my-app` (grouped by `cwd` from each session's `session_meta` line)
+
+Sessions for the same `cwd` are split across the two `dirName`s — search both if you want full coverage, or filter to one to scope by agent.
 
 ## Step 1: Clarify Intent Before Searching
 
@@ -75,12 +81,14 @@ Use available filters based on what you learned in Step 1:
 | Parameter | Description |
 |-----------|-------------|
 | `query` | Keyword anchors + semantic phrase |
-| `project` | Full project path (e.g., `/Users/.../my-project`) — not fuzzy names |
+| `project` | Full project path or `dirName` (e.g., `-Users-foo-my-app` for Claude Code, `codex--Users-foo-my-app` for Codex CLI) — not fuzzy names |
 | `session` | Specific session UUID |
 | `branch` | Git branch name |
 | `before` | Results before this date (YYYY-MM-DD) |
 | `after` | Results after this date (YYYY-MM-DD) |
 | `limit` | 5-10 per query |
+
+**Filtering by agent:** to scope a search to one agent only, pass the corresponding `dirName` to `project` — Claude Code projects have no prefix, Codex projects always start with `codex-`. To search both for the same `cwd`, fire two parallel queries (one per `dirName`) and merge.
 
 Fire 3-5 queries in parallel. Each search takes <20ms — the cost of extra searches is near zero.
 

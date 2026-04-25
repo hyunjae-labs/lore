@@ -4,8 +4,8 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![lore MCP server](https://glama.ai/mcp/servers/hyunjae-labs/lore/badges/score.svg)](https://glama.ai/mcp/servers/hyunjae-labs/lore)
 
-Semantic search across your Claude Code conversations.
-Find anything you've ever discussed -- across all projects, all sessions, any branch.
+Semantic search across your Claude Code **and** OpenAI Codex CLI conversations.
+Find anything you've ever discussed -- across all projects, all sessions, any branch, any agent.
 
 [![lore MCP server](https://glama.ai/mcp/servers/hyunjae-labs/lore/badges/card.svg)](https://glama.ai/mcp/servers/hyunjae-labs/lore)
 
@@ -13,6 +13,9 @@ Find anything you've ever discussed -- across all projects, all sessions, any br
 
 - **Hybrid search (vector + keyword)**
   Combines multilingual-e5-small embeddings with FTS5/BM25 via Reciprocal Rank Fusion. Finds results by meaning *and* exact terms.
+
+- **Multi-agent: Claude Code + Codex CLI**
+  Indexes both `~/.claude/projects/` (Claude Code) and `~/.codex/sessions/` (OpenAI Codex CLI) in the same DB. Codex sessions are grouped by `cwd` from `session_meta`, surfaced as `codex-<path>` virtual projects so you can search them together or filter to one agent.
 
 - **Fully local, zero API keys**
   Everything runs on your machine. ONNX Runtime for embedding, sqlite-vec for storage. No data leaves your device.
@@ -98,27 +101,30 @@ Claude: [calls lore search] Found 3 relevant conversations...
 
 ## Why This Exists
 
-Claude Code stores every conversation as a JSONL transcript in `~/.claude/projects/`. After a few weeks, you have hundreds of sessions across dozens of projects -- discussions about architecture decisions, debugging sessions, code reviews, and design explorations.
+Claude Code stores every conversation as a JSONL transcript in `~/.claude/projects/`, and OpenAI Codex CLI stores its rollouts in `~/.codex/sessions/YYYY/MM/DD/`. After a few weeks, you have hundreds of sessions across dozens of projects, often spread across both agents -- discussions about architecture decisions, debugging sessions, code reviews, and design explorations.
 
 But there's no way to search through them. You can't ask "what approach did we take for the auth middleware?" or "which project had that database migration discussion?"
 
-Existing tools either require cloud APIs, spawn zombie processes, or treat conversations as generic documents. lore is purpose-built for Claude Code sessions: it understands turn boundaries, tool-use chains, and thinking blocks. It runs entirely locally with zero dependencies beyond Node.js.
+Existing tools either require cloud APIs, spawn zombie processes, or treat conversations as generic documents. lore is purpose-built for AI coding sessions: it understands turn boundaries, tool-use chains, and thinking blocks, and parses both Claude Code and Codex JSONL formats natively. It runs entirely locally with zero dependencies beyond Node.js.
 
 ## How It Works
 
 ```
-~/.claude/projects/*/*.jsonl
-        |
-   JSONL Parser (extracts user/assistant messages, skips noise)
-        |
-   Turn-pair Chunker (groups by logical conversation turns)
-        |
-   Transformers.js (multilingual-e5-small, INT8 quantized, 384d)
-        |
-   sqlite-vec + FTS5 (hybrid vector + keyword storage)
-        |
-   Reciprocal Rank Fusion (combines both signals for ranking)
+~/.claude/projects/*/*.jsonl     ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+        \                                       /
+         \                                     /
+          JSONL Parser (Claude Code + Codex formats, skips noise)
+                              |
+          Turn-pair Chunker (groups by logical conversation turns)
+                              |
+          Transformers.js (multilingual-e5-small, INT8 quantized, 384d)
+                              |
+          sqlite-vec + FTS5 (hybrid vector + keyword storage)
+                              |
+          Reciprocal Rank Fusion (combines both signals for ranking)
 ```
+
+Codex sessions are grouped by `cwd` extracted from each file's `session_meta` line and surfaced as `codex-<path>` virtual projects in the index.
 
 **Storage:** Single SQLite file at `~/.lore/lore.db` with WAL mode for concurrent reads.
 
@@ -134,6 +140,7 @@ Existing tools either require cloud APIs, spawn zombie processes, or treat conve
 | `LORE_DIR` | `~/.lore` | Data directory |
 | `LORE_DB` | `~/.lore/lore.db` | Database path |
 | `CLAUDE_PROJECTS_DIR` | `~/.claude/projects` | Claude Code transcripts location |
+| `CODEX_SESSIONS_DIR` | `~/.codex/sessions` | OpenAI Codex CLI rollouts location |
 
 </details>
 
@@ -176,7 +183,7 @@ git clone https://github.com/hyunjae-labs/lore.git
 cd lore
 npm install
 npm run build
-npm test          # 118 tests
+npm test          # 135 tests
 ```
 
 ## Tech Stack
