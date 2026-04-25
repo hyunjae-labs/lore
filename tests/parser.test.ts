@@ -94,3 +94,83 @@ describe("parseLine", () => {
     expect(parseLine(JSON.stringify({ type: "last-prompt", message: {} }))).toBeNull();
   });
 });
+
+import { parseCodexLine } from "../src/indexer/parser.js";
+
+const codexUserLine = JSON.stringify({
+  timestamp: "2026-01-01T00:00:01Z",
+  type: "response_item",
+  payload: {
+    type: "message",
+    role: "user",
+    content: [{ type: "input_text", text: "EXP-244 결과 어때?" }],
+  },
+});
+
+const codexAssistantLine = JSON.stringify({
+  timestamp: "2026-01-01T00:00:02Z",
+  type: "response_item",
+  payload: {
+    type: "message",
+    role: "assistant",
+    content: [{ type: "output_text", text: "Sharpe 2.3, CAGR 142%입니다." }],
+  },
+});
+
+const codexSessionMetaLine = JSON.stringify({
+  timestamp: "2026-01-01T00:00:00Z",
+  type: "session_meta",
+  payload: { id: "abc", cwd: "/Users/test/quant-alpha" },
+});
+
+describe("parseCodexLine", () => {
+  it("parses user message", () => {
+    const result = parseCodexLine(codexUserLine);
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe("user");
+    expect(result!.text).toBe("EXP-244 결과 어때?");
+    expect(result!.timestamp).toBe("2026-01-01T00:00:01Z");
+  });
+
+  it("parses assistant message", () => {
+    const result = parseCodexLine(codexAssistantLine);
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe("assistant");
+    expect(result!.text).toBe("Sharpe 2.3, CAGR 142%입니다.");
+  });
+
+  it("returns null for session_meta lines", () => {
+    expect(parseCodexLine(codexSessionMetaLine)).toBeNull();
+  });
+
+  it("returns null for invalid JSON", () => {
+    expect(parseCodexLine("not json")).toBeNull();
+  });
+
+  it("returns null when content text is empty", () => {
+    const line = JSON.stringify({
+      type: "response_item",
+      payload: {
+        type: "message", role: "user",
+        content: [{ type: "input_text", text: "" }],
+      },
+    });
+    expect(parseCodexLine(line)).toBeNull();
+  });
+
+  it("joins multiple content blocks with double newline", () => {
+    const line = JSON.stringify({
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "response_item",
+      payload: {
+        type: "message", role: "assistant",
+        content: [
+          { type: "output_text", text: "첫 번째 블록" },
+          { type: "output_text", text: "두 번째 블록" },
+        ],
+      },
+    });
+    const result = parseCodexLine(line);
+    expect(result!.text).toBe("첫 번째 블록\n\n두 번째 블록");
+  });
+});

@@ -70,6 +70,40 @@ export function extractTextContent(type: string, message: any): string {
   return parts.join("\n\n");
 }
 
+/** Parse a Codex CLI JSONL line. Returns null for non-message lines or empty content. */
+export function parseCodexLine(line: string): ParsedRecord | null {
+  let obj: any;
+  try {
+    obj = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (!obj || obj.type !== "response_item") return null;
+
+  const payload = obj.payload;
+  if (!payload || payload.type !== "message") return null;
+  if (payload.role !== "user" && payload.role !== "assistant") return null;
+
+  const content = payload.content;
+  if (!Array.isArray(content)) return null;
+
+  const text = content
+    .filter((b: any) => b.type === "input_text" || b.type === "output_text")
+    .map((b: any) => (b.text as string) || "")
+    .filter(Boolean)
+    .join("\n\n");
+
+  if (!text) return null;
+
+  return {
+    type: payload.role as "user" | "assistant",
+    text,
+    sessionId: "",
+    timestamp: obj.timestamp || "",
+  };
+}
+
 function extractToolSummary(block: any): string {
   const name: string = block.name;
   const input: Record<string, any> = block.input || {};
