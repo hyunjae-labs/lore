@@ -327,7 +327,7 @@ function skipSession(
 async function runIndexInBackground(
   db: Database.Database,
   params: IndexParams,
-  projectSessions: Array<{ project: { dirName: string; dirPath: string; name: string }; sessions: Array<{ sessionId: string; jsonlPath: string; size: number; mtime: number }> }>,
+  projectSessions: Array<{ project: { dirName: string; dirPath: string; name: string }; sessions: SessionInfo[] }>,
   loreDir: string,
 ): Promise<void> {
   try {
