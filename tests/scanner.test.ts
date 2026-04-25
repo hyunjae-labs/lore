@@ -7,6 +7,20 @@ import {
   scanSessions,
   needsReindex,
 } from "../src/indexer/scanner.js";
+import { CONFIG } from "../src/config.js";
+
+describe("CONFIG.codexSessionsDir", () => {
+  it("defaults to ~/.codex/sessions", () => {
+    delete process.env.CODEX_SESSIONS_DIR;
+    expect(CONFIG.codexSessionsDir).toContain(".codex/sessions");
+  });
+
+  it("respects CODEX_SESSIONS_DIR env var", () => {
+    process.env.CODEX_SESSIONS_DIR = "/tmp/test-codex";
+    expect(CONFIG.codexSessionsDir).toBe("/tmp/test-codex");
+    delete process.env.CODEX_SESSIONS_DIR;
+  });
+});
 
 let tempDir: string;
 

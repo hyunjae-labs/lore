@@ -6,6 +6,9 @@ export const CONFIG = {
   get loreDir() { return process.env.LORE_DIR || join(homedir(), ".lore"); },
   get dbPath() { return process.env.LORE_DB || join(homedir(), ".lore", "lore.db"); },
   get claudeProjectsDir() { return process.env.CLAUDE_PROJECTS_DIR || join(homedir(), ".claude", "projects"); },
+  get codexSessionsDir() {
+    return process.env.CODEX_SESSIONS_DIR || join(homedir(), ".codex", "sessions");
+  },
   embeddingModel: "Xenova/multilingual-e5-small",
   embeddingDimensions: 384,
   maxChunkTokens: 1000,
