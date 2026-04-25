@@ -78,6 +78,10 @@ beforeEach(() => {
   // Point CONFIG env vars to temp dirs so CONFIG picks them up
   process.env.CLAUDE_PROJECTS_DIR = projectsDir;
   process.env.LORE_DIR = loreDir;
+  // Isolate codex sessions to an empty temp dir so tests never index real user data
+  const codexEmpty = join(tempDir, "codex-empty");
+  mkdirSync(codexEmpty, { recursive: true });
+  process.env.CODEX_SESSIONS_DIR = codexEmpty;
 
   // Ensure a clean config for each test
   saveUserConfig({ excluded_projects: [] });
@@ -87,7 +91,17 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
   delete process.env.CLAUDE_PROJECTS_DIR;
   delete process.env.LORE_DIR;
+  delete process.env.CODEX_SESSIONS_DIR;
 });
+
+function makeCodexSession(dir: string, filename: string, cwd: string, userText: string): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, filename),
+    JSON.stringify({ timestamp: "2026-01-01T00:00:00Z", type: "session_meta", payload: { id: "x", cwd } }) + "\n" +
+    JSON.stringify({ timestamp: "2026-01-01T00:00:01Z", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: userText }] } }) + "\n" +
+    JSON.stringify({ timestamp: "2026-01-01T00:00:02Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "응답입니다." }] } }) + "\n"
+  );
+}
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
@@ -621,4 +635,34 @@ describe("handleIndex", () => {
     },
     60000
   );
+
+  it("indexes codex sessions when CODEX_SESSIONS_DIR is set", async () => {
+    const codexDir = join(tempDir, "codex-sessions");
+    const sessionDir = join(codexDir, "2026", "01", "01");
+    makeCodexSession(
+      sessionDir,
+      "rollout-2026-01-01T00-00-00-aaa-bbb-ccc-ddd-eee.jsonl",
+      "/Users/test/quant-alpha",
+      "EXP-244 결과 알려줘"
+    );
+
+    process.env.CODEX_SESSIONS_DIR = codexDir;
+    process.env.CLAUDE_PROJECTS_DIR = join(tempDir, "claude-empty");
+    mkdirSync(join(tempDir, "claude-empty"), { recursive: true });
+
+    const db = makeDb();
+    await handleIndex(db, {});
+    await waitForIndexComplete();
+
+    const projects = db.prepare("SELECT * FROM projects WHERE dir_name LIKE 'codex-%'").all() as any[];
+    expect(projects.length).toBeGreaterThan(0);
+    expect(projects[0].dir_name).toContain("codex-");
+
+    const chunks = db.prepare("SELECT * FROM chunks").all() as any[];
+    expect(chunks.length).toBeGreaterThan(0);
+
+    delete process.env.CODEX_SESSIONS_DIR;
+    delete process.env.CLAUDE_PROJECTS_DIR;
+    db.close();
+  }, 60000);
 });

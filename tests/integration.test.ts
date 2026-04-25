@@ -178,6 +178,10 @@ beforeAll(() => {
 
   process.env.CLAUDE_PROJECTS_DIR = projectsDir;
   process.env.LORE_DIR = loreDir;
+  // Isolate codex sessions so tests never index real user data
+  const codexEmpty = join(tempDir, "codex-empty");
+  mkdirSync(codexEmpty, { recursive: true });
+  process.env.CODEX_SESSIONS_DIR = codexEmpty;
 
   // Create a project dir with one realistic JSONL session
   const projectPath = join(projectsDir, PROJECT_DIR_NAME);
@@ -195,6 +199,7 @@ afterAll(() => {
   rmSync(tempDir, { recursive: true, force: true });
   delete process.env.CLAUDE_PROJECTS_DIR;
   delete process.env.LORE_DIR;
+  delete process.env.CODEX_SESSIONS_DIR;
 });
 
 // ── tests ────────────────────────────────────────────────────────────────────

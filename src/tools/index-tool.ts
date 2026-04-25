@@ -11,10 +11,10 @@ import {
   deleteProjectData,
 } from "../db/queries.js";
 import type { SessionRow } from "../db/queries.js";
-import { parseLine } from "../indexer/parser.js";
+import { parseLine, parseCodexLine } from "../indexer/parser.js";
 import { groupIntoLogicalTurns, chunkTurns } from "../indexer/chunker.js";
 import { getEmbedder } from "../embedder/index.js";
-import { scanProjects, scanSessions, needsReindex } from "../indexer/scanner.js";
+import { scanProjects, scanSessions, needsReindex, scanCodexProjectsAndSessions } from "../indexer/scanner.js";
 import type { SessionInfo } from "../indexer/scanner.js";
 
 import { loadUserConfig, saveUserConfig } from "../config.js";
@@ -130,6 +130,9 @@ function pruneOrphanSessions(
   const deleteSession = db.prepare("DELETE FROM sessions WHERE id = ?");
 
   for (const project of projectsToIndex) {
+    // Codex virtual projects have no real directory — skip orphan check
+    if (project.dirName.startsWith("codex-")) continue;
+
     const projectRow = selectProject.get(project.dirName) as { id: number } | undefined;
     if (!projectRow) continue;
 
@@ -258,6 +261,16 @@ export async function handleIndex(
   const projectSessions: Array<{ project: typeof allProjects[0]; sessions: ReturnType<typeof scanSessions> }> = [];
   for (const project of projectsToIndex) {
     const sessions = scanSessions(project.dirPath);
+    totalSessions += sessions.length;
+    projectSessions.push({ project, sessions });
+  }
+
+  // Scan Codex sessions and add to pipeline (opt-out model applies)
+  const codexProjectSessions = scanCodexProjectsAndSessions(CONFIG.codexSessionsDir);
+  const codexToIndex = params.project
+    ? []
+    : codexProjectSessions.filter((cp) => !excludedSet.has(cp.project.dirName));
+  for (const { project, sessions } of codexToIndex) {
     totalSessions += sessions.length;
     projectSessions.push({ project, sessions });
   }
@@ -406,7 +419,10 @@ async function runIndexInBackground(
           continue;
         }
 
-        const records = lines.map((line) => parseLine(line)).filter((r) => r !== null);
+        const isCodex = sessionInfo.format === "codex";
+        const records = lines
+          .map((line) => isCodex ? parseCodexLine(line) : parseLine(line))
+          .filter((r) => r !== null);
 
         if (records.length === 0) {
           progress.sessionsSkipped++;
