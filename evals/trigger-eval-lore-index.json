@@ -1,0 +1,18 @@
+[
+  {"query": "이 프로젝트 인덱싱 좀 해줘 lore에", "should_trigger": true},
+  {"query": "lore 처음 세팅하려는데 어떻게 시작하면 돼? 지금 아무것도 안 되어있어", "should_trigger": true},
+  {"query": "SEAIS-v2 프로젝트는 lore에서 빼줘 너무 시끄러워 인덱싱 안 했으면 좋겠어", "should_trigger": true},
+  {"query": "아까 exclude 했던 temp-workspace 다시 인덱싱 되게 해줘", "should_trigger": true},
+  {"query": "lore rebuild 하고 싶어 전체 인덱스 날리고 처음부터 다시", "should_trigger": true},
+  {"query": "인덱싱 지금 돌아가고 있어? 상태 좀 확인해봐", "should_trigger": true},
+  {"query": "lore에 등록된 프로젝트 목록 좀 보여줘 어떤 것들이 있는지", "should_trigger": true},
+  {"query": "지난주에 auth 미들웨어 리팩터링 논의한 세션 찾아줘", "should_trigger": false},
+  {"query": "lore가 뭐야? 어떤 도구가 있어?", "should_trigger": false},
+  {"query": "git log 보여줘 최근 커밋 5개", "should_trigger": false},
+  {"query": "이전에 데이터베이스 마이그레이션 얘기한 적 있었는데 기억나?", "should_trigger": false},
+  {"query": "vault-search로 보험정보 검색해줘", "should_trigger": false},
+  {"query": "노션에서 SEAIS 관련 페이지 찾아줘", "should_trigger": false},
+  {"query": "npm publish 해줘 getlore 새 버전", "should_trigger": false},
+  {"query": "카라비너 설정에서 ctrl 규칙 좀 고쳐줘", "should_trigger": false},
+  {"query": "lore search로 지난 대화 검색해봐", "should_trigger": false}
+]

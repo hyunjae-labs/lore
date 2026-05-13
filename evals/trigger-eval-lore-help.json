@@ -1,0 +1,17 @@
+[
+  {"query": "lore가 뭐야? 어떤 도구들이 있어?", "should_trigger": true},
+  {"query": "lore 사용법 알려줘 처음이라 뭐부터 해야 할지 모르겠어", "should_trigger": true},
+  {"query": "lore에서 manage_projects 쓸 때 어떤 액션들이 있어?", "should_trigger": true},
+  {"query": "lore search 파라미터 뭐가 있어? 필터 옵션 좀 정리해줘", "should_trigger": true},
+  {"query": "what can lore do? give me the full overview", "should_trigger": true},
+  {"query": "lore guide 좀 보여줘 전체적으로 어떻게 동작하는지", "should_trigger": true},
+  {"query": "lore의 자동 인덱싱이랑 수동 인덱싱 차이가 뭐야?", "should_trigger": true},
+  {"query": "이 프로젝트 인덱싱 해줘", "should_trigger": false},
+  {"query": "지난주에 백테스트 논의한 세션 찾아줘", "should_trigger": false},
+  {"query": "lore rebuild 해줘 인덱스 전체 날리고", "should_trigger": false},
+  {"query": "SEAIS 프로젝트 lore에서 exclude 해줘", "should_trigger": false},
+  {"query": "이전에 karabiner 설정한 내용 검색해봐", "should_trigger": false},
+  {"query": "vault-search 도구 어떻게 쓰는 거야?", "should_trigger": false},
+  {"query": "claude code 키바인딩 어떻게 설정해?", "should_trigger": false},
+  {"query": "git status 보여줘", "should_trigger": false}
+]

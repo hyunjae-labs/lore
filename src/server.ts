@@ -13,12 +13,12 @@ import { handleManageProjects } from "./tools/manage-projects.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolResult = any;
 
-export async function startServer(): Promise<void> {
+export async function startServer(version: string = "0.0.0"): Promise<void> {
   const db = getDb(CONFIG.dbPath);
 
   const server = new McpServer({
     name: "lore",
-    version: "0.1.0",
+    version,
   });
 
   // search tool

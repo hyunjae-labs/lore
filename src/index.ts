@@ -75,7 +75,7 @@ if (args[0] === "index") {
   process.exit(0);
 }
 
-startServer().catch((err) => {
+startServer(pkg.version).catch((err) => {
   console.error("Failed to start lore:", err);
   process.exit(1);
 });
