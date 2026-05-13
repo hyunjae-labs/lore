@@ -1,6 +1,6 @@
 {
   "name": "getlore",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Semantic search MCP server for Claude Code conversation sessions",
   "type": "module",
   "bin": {
@@ -26,7 +26,7 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=20 <24"
+    "node": ">=20"
   },
   "keywords": [
     "mcp",
